@@ -1,6 +1,6 @@
 # Live monitor status
 
-The popover distinguishes the exact PA279CV as active, inactive, unavailable, malformed, or unreadable without exposing hardware controls.
+The popover distinguishes the exact PA279CV as active, inactive, unavailable, malformed, or unreadable.
 
 ## Public path
 
@@ -12,7 +12,7 @@ The DDC adapter matches manufacturer `AUS`, product `10088`, and alphanumeric se
 
 ## Proof
 
-The runtime skill executes `ProArtVolumeRuntimeProbe`, which compiles against the same Domain, Service, and Repository target as the app. It must return confirmed JSON with bounded volume, mapped mute, and active or inactive output. The installed popover requires visual confirmation that it presents the same state.
+The runtime skill executes `ProArtVolumeRuntimeProbe`, which compiles against the same Domain, Service, and Repository target as the app. It must return confirmed JSON with bounded volume, mapped mute, active or inactive output, and exact same-value read-back for volume and mute. The installed popover requires visual confirmation that it presents the same state.
 
 ## Gotchas
 

@@ -10,8 +10,16 @@ struct VolumeLevelTests {
     }
 
     @Test
-    func rejectsValuesOutsideHardwareBounds() {
+    func rejectsValuesOutsideHardwareRange() {
         #expect(VolumeLevel(-1) == nil)
         #expect(VolumeLevel(101) == nil)
+    }
+
+    @Test
+    func acceptsOnlyFiniteWholeSliderValues() {
+        #expect(VolumeLevel(60.0)?.rawValue == 60)
+        #expect(VolumeLevel(60.5) == nil)
+        #expect(VolumeLevel(Double.nan) == nil)
+        #expect(VolumeLevel(Double.infinity) == nil)
     }
 }

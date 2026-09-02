@@ -11,7 +11,7 @@ struct VolumeControlServiceTests {
             activeOutput: StubActiveOutputReader(result: .success(true))
         )
 
-        #expect(await service.refresh() == .confirmed(output: .active, state: confirmedState))
+        #expect(await service.refresh().status == .confirmed(output: .active, state: confirmedState))
     }
 
     @Test
@@ -22,7 +22,7 @@ struct VolumeControlServiceTests {
             activeOutput: StubActiveOutputReader(result: .success(false))
         )
 
-        #expect(await service.refresh() == .confirmed(output: .inactive, state: confirmedState))
+        #expect(await service.refresh().status == .confirmed(output: .inactive, state: confirmedState))
     }
 
     @Test
@@ -32,7 +32,7 @@ struct VolumeControlServiceTests {
             activeOutput: StubActiveOutputReader(result: .success(true))
         )
 
-        #expect(await service.refresh() == .unavailable)
+        #expect(await service.refresh().status == .unavailable)
     }
 
     @Test(arguments: [MonitorRepositoryError.malformedResponse, .readFailure])
@@ -42,7 +42,7 @@ struct VolumeControlServiceTests {
             activeOutput: StubActiveOutputReader(result: .success(true))
         )
 
-        #expect(await service.refresh() == .failure(error))
+        #expect(await service.refresh().status == .failure(error))
     }
 
     @Test
@@ -53,15 +53,23 @@ struct VolumeControlServiceTests {
             activeOutput: StubActiveOutputReader(result: .failure(.readFailure))
         )
 
-        #expect(await service.refresh() == .failure(.readFailure))
+        #expect(await service.refresh().status == .failure(.readFailure))
     }
 }
 
-private struct StubMonitorReader: MonitorStateReading {
+private struct StubMonitorReader: MonitorControlling {
     let result: Result<ConfirmedMonitorState?, MonitorRepositoryError>
 
     func readState() async throws(MonitorRepositoryError) -> ConfirmedMonitorState? {
         try result.get()
+    }
+
+    func writeVolume(_ volume: VolumeLevel) async throws(MonitorRepositoryError) -> VolumeLevel {
+        throw .writeFailure
+    }
+
+    func writeMute(_ mute: MuteState) async throws(MonitorRepositoryError) -> MuteState {
+        throw .writeFailure
     }
 }
 

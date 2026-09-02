@@ -12,8 +12,8 @@ No automated public drive exists yet. Launch the real bundle, select its menu-ba
 
 ## Proof
 
-Current gap: a human confirms that the popover opens and displays the live monitor status.
+Current gap: a human confirms that the popover opens, displays live monitor status, and exposes the bounded volume and mute controls.
 
 ## Gotchas
 
-The panel is read-only until the hardware-control ticket is implemented.
+Hardware values shown by the panel remain last-confirmed values when a command fails.

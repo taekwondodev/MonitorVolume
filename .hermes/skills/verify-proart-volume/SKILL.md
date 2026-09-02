@@ -19,7 +19,7 @@ A pass requires `status: passed`, a surviving evidence path, and no remaining ow
 
 ## Evidence
 
-Evidence lives under `.hermes/verification/evidence/<run-id>/launch.json`. It records the repository scripts' machine-readable build, bundle verification, and shared Service/Repository monitor-status results. A run passes only when the installed bundle has the expected stable identity and valid signature, exactly one process owns its executable path, and the target returns a confirmed bounded status.
+Evidence lives under `.hermes/verification/evidence/<run-id>/launch.json`. It records the repository scripts' machine-readable build, bundle verification, and shared Service/Repository monitor-status results. A run passes only when the installed bundle has the expected stable identity and valid signature, exactly one process owns its executable path, and the target returns a confirmed bounded status with exact same-value read-back for volume and mute.
 
 ## Cleanup
 
@@ -27,8 +27,8 @@ Evidence lives under `.hermes/verification/evidence/<run-id>/launch.json`. It re
 
 ## Isolation
 
-The installed bundle and macOS user session are shared resources. Run this proof serially and only when replacing and briefly launching `~/Applications/ProArt Volume.app` is acceptable.
+The installed bundle, PA279CV DDC channel, and macOS user session are shared resources. The monitor-status drive performs real same-value volume and mute writes followed by read-back. Run this proof serially and only when replacing and briefly launching `~/Applications/ProArt Volume.app` and exercising the connected target is acceptable.
 
 ## Capability map
 
-Read `references/features/README.md` before claiming coverage. Bundle launch and live Service/Repository status are automated. Icon and popover presentation remain explicit visual gaps.
+Read `references/features/README.md` before claiming coverage. Bundle launch, live Service/Repository status, and same-value hardware command confirmation are automated. Icon, popover controls, and error presentation remain explicit visual gaps.

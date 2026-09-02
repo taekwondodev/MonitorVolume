@@ -12,4 +12,13 @@ package enum MuteState: Equatable, Sendable {
             throw .malformedResponse
         }
     }
+
+    package var hardwareValue: UInt16 {
+        switch self {
+        case .muted:
+            1
+        case .unmuted:
+            2
+        }
+    }
 }

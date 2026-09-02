@@ -187,12 +187,77 @@ static PAVDDCStatus PAVReadVCP(
     return receivedMalformedResponse ? PAVDDCStatusMalformedResponse : PAVDDCStatusReadFailure;
 }
 
-PAVDDCReadResult PAVDDCReadTargetState(
+static PAVDDCStatus PAVCreateTargetService(
+    PAVIOAVFunctions functions,
     const char *manufacturer,
     uint32_t productID,
-    const char *serial
+    const char *serial,
+    IOAVServiceRef *targetService
 ) {
-    PAVDDCReadResult result = {PAVDDCStatusTargetUnavailable, 0, 0, 0};
+    io_iterator_t iterator = IO_OBJECT_NULL;
+    kern_return_t iteratorStatus = IORegistryCreateIterator(
+        kIOMainPortDefault,
+        kIOServicePlane,
+        kIORegistryIterateRecursively,
+        &iterator
+    );
+    if (iteratorStatus != KERN_SUCCESS) {
+        return PAVDDCStatusReadFailure;
+    }
+
+    PAVDDCStatus status = PAVDDCStatusTargetUnavailable;
+    bool targetFramebuffer = false;
+    io_registry_entry_t entry = IO_OBJECT_NULL;
+    while ((entry = IOIteratorNext(iterator)) != IO_OBJECT_NULL) {
+        if (IOObjectConformsTo(entry, "AppleCLCD2") || IOObjectConformsTo(entry, "IOMobileFramebufferShim")) {
+            targetFramebuffer = PAVFramebufferMatches(entry, manufacturer, productID, serial);
+        } else if (targetFramebuffer && PAVIsExternalProxy(entry)) {
+            *targetService = functions.createService(kCFAllocatorDefault, entry);
+            status = *targetService == NULL ? PAVDDCStatusReadFailure : PAVDDCStatusSuccess;
+            IOObjectRelease(entry);
+            break;
+        }
+        IOObjectRelease(entry);
+    }
+
+    IOObjectRelease(iterator);
+    return status;
+}
+
+static PAVDDCStatus PAVWriteVCP(
+    PAVIOAVFunctions functions,
+    IOAVServiceRef service,
+    uint8_t code,
+    uint16_t value
+) {
+    uint8_t request[] = {
+        0x84,
+        0x03,
+        code,
+        (uint8_t)(value >> 8),
+        (uint8_t)(value & 0xFF),
+        0x00
+    };
+    request[5] = PAVChecksum(request, 5, 0x6E ^ 0x51);
+    bool wrote = false;
+    for (uint32_t attempt = 0; attempt < 2; attempt += 1) {
+        usleep(50000);
+        IOReturn status = functions.writeI2C(service, 0x37, 0x51, request, sizeof(request));
+        if (status == kIOReturnSuccess) {
+            wrote = true;
+        }
+    }
+    return wrote ? PAVDDCStatusSuccess : PAVDDCStatusWriteFailure;
+}
+
+static PAVDDCWriteResult PAVWriteTargetValue(
+    const char *manufacturer,
+    uint32_t productID,
+    const char *serial,
+    uint8_t code,
+    uint16_t value
+) {
+    PAVDDCWriteResult result = {PAVDDCStatusTargetUnavailable, 0, 0};
     if (manufacturer == NULL || serial == NULL) {
         result.status = PAVDDCStatusMalformedResponse;
         return result;
@@ -203,55 +268,97 @@ PAVDDCReadResult PAVDDCReadTargetState(
         return result;
     }
 
-    io_iterator_t iterator = IO_OBJECT_NULL;
-    kern_return_t iteratorStatus = IORegistryCreateIterator(
-        kIOMainPortDefault,
-        kIOServicePlane,
-        kIORegistryIterateRecursively,
-        &iterator
+    IOAVServiceRef service = NULL;
+    result.status = PAVCreateTargetService(
+        functions,
+        manufacturer,
+        productID,
+        serial,
+        &service
     );
-    if (iteratorStatus != KERN_SUCCESS) {
+    if (result.status == PAVDDCStatusSuccess) {
+        result.status = PAVWriteVCP(functions, service, code, value);
+    }
+    if (result.status == PAVDDCStatusSuccess) {
+        usleep(250000);
+        result.status = PAVReadVCP(
+            functions,
+            service,
+            code,
+            &result.current,
+            &result.maximum
+        );
+    }
+    if (service != NULL) {
+        CFRelease(service);
+    }
+    dlclose(functions.handle);
+    return result;
+}
+
+PAVDDCReadResult PAVDDCReadTargetState(
+    const char *manufacturer,
+    uint32_t productID,
+    const char *serial
+) {
+    PAVDDCReadResult result = {PAVDDCStatusTargetUnavailable, 0, 0, 0, 0};
+    if (manufacturer == NULL || serial == NULL) {
+        result.status = PAVDDCStatusMalformedResponse;
+        return result;
+    }
+    PAVIOAVFunctions functions = {0};
+    if (!PAVLoadIOAVFunctions(&functions)) {
         result.status = PAVDDCStatusReadFailure;
-        dlclose(functions.handle);
         return result;
     }
 
-    bool targetFramebuffer = false;
-    io_registry_entry_t entry = IO_OBJECT_NULL;
-    while ((entry = IOIteratorNext(iterator)) != IO_OBJECT_NULL) {
-        if (IOObjectConformsTo(entry, "AppleCLCD2") || IOObjectConformsTo(entry, "IOMobileFramebufferShim")) {
-            targetFramebuffer = PAVFramebufferMatches(entry, manufacturer, productID, serial);
-        } else if (targetFramebuffer && PAVIsExternalProxy(entry)) {
-            IOAVServiceRef service = functions.createService(kCFAllocatorDefault, entry);
-            if (service == NULL) {
-                result.status = PAVDDCStatusReadFailure;
-            } else {
-                result.status = PAVReadVCP(
-                    functions,
-                    service,
-                    0x62,
-                    &result.volumeCurrent,
-                    &result.volumeMaximum
-                );
-                if (result.status == PAVDDCStatusSuccess) {
-                    uint16_t muteMaximum = 0;
-                    result.status = PAVReadVCP(
-                        functions,
-                        service,
-                        0x8D,
-                        &result.muteCurrent,
-                        &muteMaximum
-                    );
-                }
-                CFRelease(service);
-            }
-            IOObjectRelease(entry);
-            break;
-        }
-        IOObjectRelease(entry);
+    IOAVServiceRef service = NULL;
+    result.status = PAVCreateTargetService(
+        functions,
+        manufacturer,
+        productID,
+        serial,
+        &service
+    );
+    if (result.status == PAVDDCStatusSuccess) {
+        result.status = PAVReadVCP(
+            functions,
+            service,
+            0x62,
+            &result.volumeCurrent,
+            &result.volumeMaximum
+        );
     }
-
-    IOObjectRelease(iterator);
+    if (result.status == PAVDDCStatusSuccess) {
+        result.status = PAVReadVCP(
+            functions,
+            service,
+            0x8D,
+            &result.muteCurrent,
+            &result.muteMaximum
+        );
+    }
+    if (service != NULL) {
+        CFRelease(service);
+    }
     dlclose(functions.handle);
     return result;
+}
+
+PAVDDCWriteResult PAVDDCWriteTargetVolume(
+    const char *manufacturer,
+    uint32_t productID,
+    const char *serial,
+    uint16_t volume
+) {
+    return PAVWriteTargetValue(manufacturer, productID, serial, 0x62, volume);
+}
+
+PAVDDCWriteResult PAVDDCWriteTargetMute(
+    const char *manufacturer,
+    uint32_t productID,
+    const char *serial,
+    uint16_t mute
+) {
+    return PAVWriteTargetValue(manufacturer, productID, serial, 0x8D, mute);
 }

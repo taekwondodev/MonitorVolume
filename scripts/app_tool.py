@@ -308,7 +308,7 @@ def probe_monitor_status() -> Dict[str, Any]:
     executable = ROOT / ".build" / "release" / "ProArtVolumeRuntimeProbe"
     if not executable.is_file() or not os.access(executable, os.X_OK):
         raise RuntimeError(f"Runtime monitor probe is missing: {executable}")
-    probe = run([str(executable)], cwd=ROOT)
+    probe = run([str(executable), "--verify-controls"], cwd=ROOT)
     result = json.loads(probe.stdout)
     if result.get("status") != "confirmed":
         raise RuntimeError(f"Monitor status is not confirmed: {result.get('status')}")
@@ -316,6 +316,10 @@ def probe_monitor_status() -> Dict[str, Any]:
         raise RuntimeError("Monitor probe returned an invalid audio-output state")
     if result.get("mute") not in ("muted", "unmuted"):
         raise RuntimeError("Monitor probe returned an invalid mute state")
+    if result.get("volume_write_confirmed") is not True:
+        raise RuntimeError("Monitor probe did not confirm the volume write")
+    if result.get("mute_write_confirmed") is not True:
+        raise RuntimeError("Monitor probe did not confirm the mute write")
     volume = result.get("volume")
     if not isinstance(volume, int) or not 0 <= volume <= 100:
         raise RuntimeError("Monitor probe returned an invalid volume")

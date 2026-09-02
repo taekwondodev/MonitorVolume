@@ -45,7 +45,7 @@ def prove() -> Dict[str, Any]:
             "action": "build, install, and open the Release bundle through repository tooling",
             "build": build,
             "monitor_status": monitor_status,
-            "pass_condition": "bundle, exact live process, and shared Service/Repository monitor status are verified",
+            "pass_condition": "bundle, exact live process, monitor status, and same-value volume and mute read-back are verified",
             "status": "passed",
             "verification": verification,
         }
@@ -56,7 +56,7 @@ def prove() -> Dict[str, Any]:
         raise RuntimeError("Evidence did not survive cleanup")
     return {
         "status": "passed",
-        "capability": "launch menu-bar agent and read live monitor status",
+        "capability": "launch menu-bar agent and verify live monitor controls",
         "cleanup": cleanup,
         "evidence": str(evidence_path),
     }
