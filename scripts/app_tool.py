@@ -19,6 +19,7 @@ APP_NAME = "ProArt Volume"
 EXECUTABLE_NAME = "ProArtVolume"
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE_PLIST = ROOT / "Resources" / "Info.plist"
+SOURCE_NOTICES = ROOT / "THIRD_PARTY_NOTICES.md"
 INSTALLED_BUNDLE = Path.home() / "Applications" / f"{APP_NAME}.app"
 INSTALLED_EXECUTABLE = INSTALLED_BUNDLE / "Contents" / "MacOS" / EXECUTABLE_NAME
 
@@ -98,8 +99,11 @@ def assemble_bundle(destination: Path, source_executable: Path) -> None:
         raise RuntimeError(f"Staging destination already exists: {destination}")
     executable_dir = destination / "Contents" / "MacOS"
     executable_dir.mkdir(parents=True)
+    resources_dir = destination / "Contents" / "Resources"
+    resources_dir.mkdir()
     shutil.copy2(source_executable, executable_dir / EXECUTABLE_NAME)
     shutil.copy2(SOURCE_PLIST, destination / "Contents" / "Info.plist")
+    shutil.copy2(SOURCE_NOTICES, resources_dir / SOURCE_NOTICES.name)
     load_metadata(destination / "Contents" / "Info.plist")
     run(["codesign", "--force", "--sign", "-", str(destination)])
     verify_bundle(destination, require_live_process=False)
@@ -119,7 +123,7 @@ def exact_processes(executable: Path) -> List[int]:
 def stop_installed_app() -> List[int]:
     if not INSTALLED_BUNDLE.exists() and not INSTALLED_BUNDLE.is_symlink():
         return []
-    verify_bundle(INSTALLED_BUNDLE, require_live_process=False)
+    verify_bundle(INSTALLED_BUNDLE, require_live_process=False, require_notices=False)
     stopped = []
     for pid in exact_processes(INSTALLED_EXECUTABLE):
         current = exact_processes(INSTALLED_EXECUTABLE)
@@ -144,7 +148,11 @@ def stop_installed_app() -> List[int]:
     return sorted(set(stopped + survivors))
 
 
-def verify_bundle(bundle: Path, require_live_process: bool) -> Dict[str, Any]:
+def verify_bundle(
+    bundle: Path,
+    require_live_process: bool,
+    require_notices: bool = True,
+) -> Dict[str, Any]:
     contents = bundle / "Contents"
     executable_dir = contents / "MacOS"
     executable = executable_dir / EXECUTABLE_NAME
@@ -153,8 +161,12 @@ def verify_bundle(bundle: Path, require_live_process: bool) -> Dict[str, Any]:
     if not bundle.is_dir():
         raise RuntimeError(f"Application bundle is missing or unsafe: {bundle}")
     plist = contents / "Info.plist"
+    notices = contents / "Resources" / SOURCE_NOTICES.name
     if not executable.is_file() or not os.access(executable, os.X_OK):
         raise RuntimeError(f"Bundle executable is missing or unsafe: {executable}")
+    notices_valid = notices.is_file() and notices.read_bytes() == SOURCE_NOTICES.read_bytes()
+    if require_notices and not notices_valid:
+        raise RuntimeError(f"Third-party notices are missing or invalid: {notices}")
     metadata = load_metadata(plist)
     run(["codesign", "--verify", "--deep", "--strict", str(bundle)])
     pids = exact_processes(executable)
@@ -167,6 +179,7 @@ def verify_bundle(bundle: Path, require_live_process: bool) -> Dict[str, Any]:
         "ls_ui_element": metadata["LSUIElement"],
         "pids": pids,
         "signature": "valid",
+        "third_party_notices": str(notices) if notices_valid else None,
     }
 
 
@@ -175,22 +188,22 @@ def reconcile_backup(backup: Path) -> None:
         return
     if backup.is_symlink() or not backup.is_dir():
         raise RuntimeError(f"Backup path is unsafe: {backup}")
-    verify_bundle(backup, require_live_process=False)
+    verify_bundle(backup, require_live_process=False, require_notices=False)
     if not INSTALLED_BUNDLE.exists() and not INSTALLED_BUNDLE.is_symlink():
         backup.rename(INSTALLED_BUNDLE)
         return
-    verify_bundle(INSTALLED_BUNDLE, require_live_process=False)
+    verify_bundle(INSTALLED_BUNDLE, require_live_process=False, require_notices=False)
     shutil.rmtree(backup)
 
 
-def launch_and_verify(bundle: Path) -> Dict[str, Any]:
+def launch_and_verify(bundle: Path, require_notices: bool = True) -> Dict[str, Any]:
     run(["open", "-n", "-a", str(bundle)])
     deadline = time.monotonic() + 10
     while time.monotonic() < deadline:
         if len(exact_processes(INSTALLED_EXECUTABLE)) == 1:
             break
         time.sleep(0.1)
-    return verify_bundle(bundle, require_live_process=True)
+    return verify_bundle(bundle, require_live_process=True, require_notices=require_notices)
 
 
 def rollback_install(backup: Path, replaced: bool, was_running: bool) -> None:
@@ -202,7 +215,7 @@ def rollback_install(backup: Path, replaced: bool, was_running: bool) -> None:
             raise RuntimeError("Previous application backup is unavailable for rollback")
         backup.rename(INSTALLED_BUNDLE)
         if was_running:
-            launch_and_verify(INSTALLED_BUNDLE)
+            launch_and_verify(INSTALLED_BUNDLE, require_notices=False)
 
 
 def install_and_launch() -> Dict[str, Any]:
@@ -215,7 +228,7 @@ def install_and_launch() -> Dict[str, Any]:
     if INSTALLED_BUNDLE.is_symlink():
         raise RuntimeError(f"Installed bundle must not be a symlink: {INSTALLED_BUNDLE}")
     if INSTALLED_BUNDLE.exists():
-        verify_bundle(INSTALLED_BUNDLE, require_live_process=False)
+        verify_bundle(INSTALLED_BUNDLE, require_live_process=False, require_notices=False)
     source_executable = build_release()
     staging_root = Path(tempfile.mkdtemp(prefix=".ProArtVolume-install-", dir=applications))
     staged_bundle = staging_root / INSTALLED_BUNDLE.name
@@ -254,6 +267,21 @@ def install_and_launch() -> Dict[str, Any]:
 
 def check_source() -> Dict[str, Any]:
     build_release()
+    if not SOURCE_NOTICES.is_file():
+        raise RuntimeError(f"Third-party notices are missing: {SOURCE_NOTICES}")
+    run(
+        [
+            "xcrun",
+            "clang",
+            "-Wall",
+            "-Wextra",
+            "-Werror",
+            "-fsyntax-only",
+            "-I",
+            str(ROOT / "Sources" / "MonitorTransport" / "include"),
+            str(ROOT / "Sources" / "MonitorTransport" / "MonitorTransport.c"),
+        ]
+    )
     shell_scripts = sorted((ROOT / "scripts").glob("*.sh"))
     for script in shell_scripts:
         run(["bash", "-n", str(script)])
@@ -268,21 +296,46 @@ def check_source() -> Dict[str, Any]:
     run([sys.executable, str(ROOT / "Tests" / "Tooling" / "command_surface_test.py")], cwd=ROOT)
     return {
         "status": "passed",
+        "c_transport_warnings_as_errors": True,
         "release_strict_concurrency": True,
         "shell_scripts_checked": [str(path.relative_to(ROOT)) for path in shell_scripts],
         "python_files_checked": [str(path.relative_to(ROOT)) for path in python_files],
     }
 
 
+def probe_monitor_status() -> Dict[str, Any]:
+    build_release()
+    executable = ROOT / ".build" / "release" / "ProArtVolumeRuntimeProbe"
+    if not executable.is_file() or not os.access(executable, os.X_OK):
+        raise RuntimeError(f"Runtime monitor probe is missing: {executable}")
+    probe = run([str(executable)], cwd=ROOT)
+    result = json.loads(probe.stdout)
+    if result.get("status") != "confirmed":
+        raise RuntimeError(f"Monitor status is not confirmed: {result.get('status')}")
+    if result.get("output") not in ("active", "inactive"):
+        raise RuntimeError("Monitor probe returned an invalid audio-output state")
+    if result.get("mute") not in ("muted", "unmuted"):
+        raise RuntimeError("Monitor probe returned an invalid mute state")
+    volume = result.get("volume")
+    if not isinstance(volume, int) or not 0 <= volume <= 100:
+        raise RuntimeError("Monitor probe returned an invalid volume")
+    return result
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("command", choices=("build", "check", "stop", "verify"))
+    parser.add_argument(
+        "command",
+        choices=("build", "check", "probe-monitor-status", "stop", "verify"),
+    )
     arguments = parser.parse_args()
     try:
         if arguments.command == "build":
             result = install_and_launch()
         elif arguments.command == "check":
             result = check_source()
+        elif arguments.command == "probe-monitor-status":
+            result = probe_monitor_status()
         elif arguments.command == "stop":
             result = {"status": "stopped", "pids": stop_installed_app()}
         else:

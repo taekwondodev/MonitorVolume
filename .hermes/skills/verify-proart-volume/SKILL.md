@@ -1,6 +1,6 @@
 ---
 name: verify-proart-volume
-description: Use when verifying ProArt Volume's macOS menu-bar bundle launch and runtime presence.
+description: Use when verifying ProArt Volume's bundle, runtime presence, and monitor-status presentation.
 ---
 
 # Verify ProArt Volume
@@ -19,7 +19,7 @@ A pass requires `status: passed`, a surviving evidence path, and no remaining ow
 
 ## Evidence
 
-Evidence lives under `.hermes/verification/evidence/<run-id>/launch.json`. It records the repository scripts' machine-readable build and verification results. A launch passes only when the installed bundle has the expected stable identity and valid signature and exactly one process owns its executable path.
+Evidence lives under `.hermes/verification/evidence/<run-id>/launch.json`. It records the repository scripts' machine-readable build, bundle verification, and shared Service/Repository monitor-status results. A run passes only when the installed bundle has the expected stable identity and valid signature, exactly one process owns its executable path, and the target returns a confirmed bounded status.
 
 ## Cleanup
 
@@ -31,4 +31,4 @@ The installed bundle and macOS user session are shared resources. Run this proof
 
 ## Capability map
 
-Read `references/features/README.md` before claiming coverage. Only bundle launch is currently automated. Icon and popover presentation remain explicit visual gaps.
+Read `references/features/README.md` before claiming coverage. Bundle launch and live Service/Repository status are automated. Icon and popover presentation remain explicit visual gaps.

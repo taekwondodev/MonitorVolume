@@ -36,6 +36,7 @@ def prove() -> Dict[str, Any]:
         build = run_json([str(scripts / "build-app.sh")], root)
         launched = True
         verification = run_json([str(scripts / "verify-installed-app.sh")], root)
+        monitor_status = run_json([str(scripts / "probe-monitor-status.sh")], root)
         run_id = uuid.uuid4().hex
         evidence_dir = root / ".hermes" / "verification" / "evidence" / run_id
         evidence_dir.mkdir(parents=True)
@@ -43,7 +44,8 @@ def prove() -> Dict[str, Any]:
         evidence = {
             "action": "build, install, and open the Release bundle through repository tooling",
             "build": build,
-            "pass_condition": "installed bundle identity, signature, executable, and exact live process are verified",
+            "monitor_status": monitor_status,
+            "pass_condition": "bundle, exact live process, and shared Service/Repository monitor status are verified",
             "status": "passed",
             "verification": verification,
         }
@@ -54,7 +56,7 @@ def prove() -> Dict[str, Any]:
         raise RuntimeError("Evidence did not survive cleanup")
     return {
         "status": "passed",
-        "capability": "launch installed menu-bar agent",
+        "capability": "launch menu-bar agent and read live monitor status",
         "cleanup": cleanup,
         "evidence": str(evidence_path),
     }

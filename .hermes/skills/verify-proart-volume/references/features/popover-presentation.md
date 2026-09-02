@@ -4,7 +4,7 @@ The user can select the menu-bar item and see the ProArt Volume popover.
 
 ## Public path
 
-The `MenuBarExtra` content lives in `Sources/ProArtVolume/ProArtVolumeApp.swift`.
+The `MenuBarExtra` composition root lives in `Sources/ProArtVolume/ProArtVolumeApp.swift`; its content lives in `Sources/ProArtVolume/Handler/MonitorStatusView.swift`.
 
 ## Drive
 
@@ -12,8 +12,8 @@ No automated public drive exists yet. Launch the real bundle, select its menu-ba
 
 ## Proof
 
-Current gap: a human confirms that the popover opens and displays the application name.
+Current gap: a human confirms that the popover opens and displays the live monitor status.
 
 ## Gotchas
 
-The scaffold does not yet contain the approved volume controls. This capability map must be updated when the product UI is implemented.
+The panel is read-only until the hardware-control ticket is implemented.

@@ -11,10 +11,28 @@ let package = Package(
         .executable(name: "ProArtVolume", targets: ["ProArtVolume"])
     ],
     targets: [
-        .executableTarget(name: "ProArtVolume"),
+        .target(
+            name: "MonitorTransport",
+            linkerSettings: [
+                .linkedFramework("CoreFoundation"),
+                .linkedFramework("IOKit")
+            ]
+        ),
+        .target(
+            name: "ProArtVolumeCore",
+            dependencies: ["MonitorTransport"]
+        ),
+        .executableTarget(
+            name: "ProArtVolume",
+            dependencies: ["ProArtVolumeCore"]
+        ),
+        .executableTarget(
+            name: "ProArtVolumeRuntimeProbe",
+            dependencies: ["ProArtVolumeCore"]
+        ),
         .testTarget(
             name: "ProArtVolumeTests",
-            dependencies: ["ProArtVolume"]
+            dependencies: ["ProArtVolume", "ProArtVolumeCore"]
         )
     ]
 )
