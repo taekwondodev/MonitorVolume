@@ -1,7 +1,6 @@
 import Testing
 @testable import ProArtVolumeCore
 
-@Suite
 struct VolumeControlServiceTests {
     @Test
     func publishesConfirmedActiveState() async throws {

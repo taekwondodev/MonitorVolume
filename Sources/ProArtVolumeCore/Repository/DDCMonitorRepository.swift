@@ -7,6 +7,7 @@ package struct DDCMonitorRepository: MonitorControlling {
         self.identity = identity
     }
 
+    @concurrent
     package func readState() async throws(MonitorRepositoryError) -> ConfirmedMonitorState? {
         let result = PAVDDCReadTargetState(
             identity.manufacturer,
@@ -33,6 +34,7 @@ package struct DDCMonitorRepository: MonitorControlling {
         }
     }
 
+    @concurrent
     package func writeVolume(_ volume: VolumeLevel) async throws(MonitorRepositoryError) -> VolumeLevel {
         let result = PAVDDCWriteTargetVolume(
             identity.manufacturer,
@@ -51,6 +53,7 @@ package struct DDCMonitorRepository: MonitorControlling {
         return confirmed
     }
 
+    @concurrent
     package func writeMute(_ mute: MuteState) async throws(MonitorRepositoryError) -> MuteState {
         let result = PAVDDCWriteTargetMute(
             identity.manufacturer,

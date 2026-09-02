@@ -1,7 +1,6 @@
 import Testing
 @testable import ProArtVolumeCore
 
-@Suite
 struct VolumeLevelTests {
     @Test
     func acceptsHardwareBounds() {

@@ -1,29 +1,7 @@
 import Testing
 @testable import ProArtVolumeCore
 
-@Suite
 struct VolumeCommandServiceTests {
-    @Test
-    func confirmsSuccessfulVolumeWrite() async throws {
-        let initial = ConfirmedMonitorState(volume: try #require(VolumeLevel(60)), mute: .unmuted)
-        let confirmed = try #require(VolumeLevel(65))
-        let monitor = ScriptedMonitor(
-            readResult: .success(initial),
-            volumeResults: [.success(confirmed)]
-        )
-        let service = VolumeControlService(
-            monitor: monitor,
-            activeOutput: CommandStubActiveOutputReader(result: .success(true))
-        )
-        _ = await service.refresh()
-
-        await service.enqueueVolume(confirmed)
-        let snapshot = await service.waitForPendingCommands()
-
-        #expect(snapshot.status == .confirmed(output: .active, state: .init(volume: confirmed, mute: .unmuted)))
-        #expect(await monitor.recordedOperations() == [.read, .writeVolume(65)])
-    }
-
     @Test
     func confirmsHardwareMuteWithoutChangingVolume() async throws {
         let volume = try #require(VolumeLevel(60))

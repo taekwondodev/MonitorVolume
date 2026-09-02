@@ -32,7 +32,7 @@ let package = Package(
         ),
         .testTarget(
             name: "ProArtVolumeTests",
-            dependencies: ["ProArtVolume", "ProArtVolumeCore"]
+            dependencies: ["ProArtVolumeCore"]
         )
     ]
 )

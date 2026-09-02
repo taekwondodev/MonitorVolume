@@ -120,32 +120,36 @@ def exact_processes(executable: Path) -> List[int]:
     return matches
 
 
-def stop_installed_app() -> List[int]:
-    if not INSTALLED_BUNDLE.exists() and not INSTALLED_BUNDLE.is_symlink():
-        return []
-    verify_bundle(INSTALLED_BUNDLE, require_live_process=False, require_notices=False)
+def stop_exact_processes(executable: Path) -> List[int]:
     stopped = []
-    for pid in exact_processes(INSTALLED_EXECUTABLE):
-        current = exact_processes(INSTALLED_EXECUTABLE)
+    for pid in exact_processes(executable):
+        current = exact_processes(executable)
         if pid not in current:
             continue
         os.kill(pid, signal.SIGTERM)
         stopped.append(pid)
     deadline = time.monotonic() + 5
-    while time.monotonic() < deadline and exact_processes(INSTALLED_EXECUTABLE):
+    while time.monotonic() < deadline and exact_processes(executable):
         time.sleep(0.1)
-    survivors = exact_processes(INSTALLED_EXECUTABLE)
+    survivors = exact_processes(executable)
     for pid in survivors:
-        current = exact_processes(INSTALLED_EXECUTABLE)
+        current = exact_processes(executable)
         if pid in current:
             os.kill(pid, signal.SIGKILL)
     if survivors:
         deadline = time.monotonic() + 2
-        while time.monotonic() < deadline and exact_processes(INSTALLED_EXECUTABLE):
+        while time.monotonic() < deadline and exact_processes(executable):
             time.sleep(0.1)
-    if exact_processes(INSTALLED_EXECUTABLE):
+    if exact_processes(executable):
         raise RuntimeError("The exact installed application process survived termination")
     return sorted(set(stopped + survivors))
+
+
+def stop_installed_app() -> List[int]:
+    if not INSTALLED_BUNDLE.exists() and not INSTALLED_BUNDLE.is_symlink():
+        return []
+    verify_bundle(INSTALLED_BUNDLE, require_live_process=False, require_notices=False)
+    return stop_exact_processes(INSTALLED_EXECUTABLE)
 
 
 def verify_bundle(
@@ -207,12 +211,14 @@ def launch_and_verify(bundle: Path, require_notices: bool = True) -> Dict[str, A
 
 
 def rollback_install(backup: Path, replaced: bool, was_running: bool) -> None:
+    if replaced and (not backup.exists() or backup.is_symlink()):
+        raise RuntimeError("Previous application backup is unavailable for rollback")
+    if replaced:
+        verify_bundle(backup, require_live_process=False, require_notices=False)
     if INSTALLED_BUNDLE.exists() or INSTALLED_BUNDLE.is_symlink():
-        stop_installed_app()
+        stop_exact_processes(INSTALLED_EXECUTABLE)
         shutil.rmtree(INSTALLED_BUNDLE)
     if replaced:
-        if not backup.exists() or backup.is_symlink():
-            raise RuntimeError("Previous application backup is unavailable for rollback")
         backup.rename(INSTALLED_BUNDLE)
         if was_running:
             launch_and_verify(INSTALLED_BUNDLE, require_notices=False)
