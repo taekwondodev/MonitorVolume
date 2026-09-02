@@ -12,11 +12,11 @@ Launch Services opens the assembled `.app` bundle whose executable is the SwiftP
 python3 .hermes/skills/verify-proart-volume/scripts/verify.py prove
 ```
 
-The helper uses a unique bundle, identifier, build directory, and run directory.
+The helper delegates to the repository-owned scripts that build, install, sign, launch, verify, and stop `~/Applications/ProArt Volume.app`.
 
 ## Proof
 
-The exact executable inside the prepared bundle remains alive after launch. The helper writes `.hermes/verification/evidence/<run-id>/launch.json`, terminates only the owned PID, removes scratch state, and confirms that evidence remains readable.
+The installed bundle has the stable expected identity and valid signature, and exactly one process owns its executable path after launch. The helper writes `.hermes/verification/evidence/<run-id>/launch.json`, delegates exact-process termination to repository tooling, and confirms that evidence remains readable.
 
 ## Gotchas
 

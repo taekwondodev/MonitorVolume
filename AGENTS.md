@@ -2,7 +2,13 @@
 
 ## Verification
 
-Run `swift test` for tests and `swift build -c release -Xswiftc -strict-concurrency=complete` for the production build.
+Use the repository command surface:
+
+- `make test` runs the Swift test suite.
+- `make check` runs the strict-concurrency Release build and tooling checks.
+- `make build` builds, signs, installs, and launches `~/Applications/ProArt Volume.app`.
+- `make verify` verifies the installed bundle and exact live process.
+- `make clean` removes only SwiftPM build artifacts.
 
 ## Dev cycle
 

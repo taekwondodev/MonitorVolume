@@ -5,7 +5,7 @@ description: Use when verifying ProArt Volume's macOS menu-bar bundle launch and
 
 # Verify ProArt Volume
 
-Verify the real macOS application bundle through Launch Services. The helper owns an isolated ad-hoc signed bundle, one exact process, scratch state, and durable JSON evidence.
+Verify the installed Release application through the repository-owned build and verification scripts. The helper owns only durable JSON evidence and the exact process launched by the build command.
 
 ## Quick proof
 
@@ -15,49 +15,19 @@ Run from the repository root:
 python3 .hermes/skills/verify-proart-volume/scripts/verify.py prove
 ```
 
-A pass requires `status: passed`, a surviving evidence path, and no remaining owned process.
-
-## Launch
-
-Prepare an isolated Release bundle:
-
-```sh
-python3 .hermes/skills/verify-proart-volume/scripts/verify.py prepare
-```
-
-The JSON response contains `state`. Preserve that path for the following commands. Preparation builds with strict concurrency, assembles `ProArt Volume.app`, writes its agent-only plist, and applies an ad-hoc signature.
-
-## Doctor
-
-```sh
-python3 .hermes/skills/verify-proart-volume/scripts/verify.py doctor --state <state-path>
-```
-
-Doctor verifies the intended repository, bundle structure, `LSUIElement`, executable path, and code signature. It is read-only.
-
-## Drive
-
-```sh
-python3 .hermes/skills/verify-proart-volume/scripts/verify.py drive --state <state-path>
-```
-
-Drive opens the prepared bundle through Launch Services, resolves the process by its exact executable path, checks that it remains alive, and writes the launch evidence named in the response.
+A pass requires `status: passed`, a surviving evidence path, and no remaining owned process. The drive delegates build, bundle assembly, stable metadata, signing, installation, launch, process matching, and verification to `scripts/build-app.sh`, `scripts/verify-installed-app.sh`, and `scripts/stop-app.sh`.
 
 ## Evidence
 
-Evidence lives under `.hermes/verification/evidence/<run-id>/launch.json`. It records the bundle identity, executable, PID, process command, launch method, liveness checks, and pass condition. A launch passes only when the process remains alive and its command identifies the exact prepared bundle.
+Evidence lives under `.hermes/verification/evidence/<run-id>/launch.json`. It records the repository scripts' machine-readable build and verification results. A launch passes only when the installed bundle has the expected stable identity and valid signature and exactly one process owns its executable path.
 
 ## Cleanup
 
-```sh
-python3 .hermes/skills/verify-proart-volume/scripts/verify.py cleanup --state <state-path>
-```
-
-Cleanup signals only the PID whose current command still contains the exact owned executable path. It removes run scratch state and preserves evidence. `prove` performs cleanup even after a failed drive.
+`prove` calls `scripts/stop-app.sh` after a successful launch, including when later verification fails. Repository tooling revalidates the exact executable path before signalling a process. The installed bundle and evidence remain in place.
 
 ## Isolation
 
-Build, bundle, state, and identifier are unique per run. Parallel builds and launches are safe. Launch Services and the macOS user session remain shared platform resources, so visual menu-bar drives must run serially until a dedicated UI harness exists.
+The installed bundle and macOS user session are shared resources. Run this proof serially and only when replacing and briefly launching `~/Applications/ProArt Volume.app` is acceptable.
 
 ## Capability map
 
