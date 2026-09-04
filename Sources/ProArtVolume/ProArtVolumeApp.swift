@@ -8,11 +8,37 @@ struct ProArtVolumeApp: App {
     init() {
         let identity = MonitorIdentity.target
         let activeOutput = CoreAudioOutputRepository(identity: identity)
+        let latencyRecorder: LatencyRecorder?
+        do {
+            latencyRecorder = try LatencyRecorder.configured()
+        } catch {
+            fatalError("Latency measurement setup failed: \(error.localizedDescription)")
+        }
+        let monitor: any MonitorControlling
+        let serviceActiveOutput: any ActiveAudioOutputReading
+        if let latencyRecorder {
+            monitor = MeasuredMonitorController(
+                base: DDCMonitorRepository(identity: identity),
+                recorder: latencyRecorder
+            )
+            serviceActiveOutput = MeasuredActiveAudioOutputReader(
+                base: activeOutput,
+                recorder: latencyRecorder
+            )
+        } else {
+            monitor = DDCMonitorRepository(identity: identity)
+            serviceActiveOutput = activeOutput
+        }
         let service = VolumeControlService(
-            monitor: DDCMonitorRepository(identity: identity),
-            activeOutput: activeOutput
+            monitor: monitor,
+            activeOutput: serviceActiveOutput,
+            measurementObserver: latencyRecorder?.makeServiceObserver()
         )
-        let model = MonitorStatusModel(service: service, activeOutput: activeOutput)
+        let model = MonitorStatusModel(
+            service: service,
+            activeOutput: activeOutput,
+            latencyRecorder: latencyRecorder
+        )
         model.activateMediaKeyControl()
         self.model = model
     }

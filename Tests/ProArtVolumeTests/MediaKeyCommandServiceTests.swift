@@ -1,3 +1,4 @@
+import Synchronization
 import Testing
 @testable import ProArtVolumeCore
 
@@ -67,6 +68,35 @@ struct MediaKeyCommandServiceTests {
         let snapshot = await service.waitForPendingCommands()
         #expect(snapshot.status == .confirmed(output: .active, state: .init(volume: try #require(VolumeLevel(65)), mute: .unmuted)))
         #expect(await monitor.maximumConcurrentWrites == 1)
+    }
+
+    @Test
+    func reportsMeasurementContextsForAggregatedVolumeCommands() async throws {
+        let initial = ConfirmedMonitorState(volume: try #require(VolumeLevel(50)), mute: .unmuted)
+        let monitor = MediaControlledMonitor(initial: initial)
+        let output = MediaActiveOutputReader(values: [true, true])
+        let records = ServiceMeasurementRecords()
+        let observer = ControlMeasurementObserver { stage, context in
+            records.append(stage: stage, context: context)
+        }
+        let service = VolumeControlService(
+            monitor: monitor,
+            activeOutput: output,
+            measurementObserver: observer
+        )
+
+        await service.enqueueVolumeStep(.increase, measurementID: ControlMeasurementID(1))
+        #expect(await monitor.nextWrite() == 55)
+        await service.enqueueVolumeStep(.increase, measurementID: ControlMeasurementID(2))
+        await service.enqueueVolumeStep(.increase, measurementID: ControlMeasurementID(3))
+        #expect(await monitor.completeWrite())
+        #expect(await monitor.nextWrite() == 65)
+        #expect(await monitor.completeWrite())
+        _ = await service.waitForPendingCommands()
+
+        #expect(records.enqueuedInteractionIDs == [[1], [2], [3]])
+        #expect(records.startedInteractionIDs == [[1], [2, 3]])
+        #expect(records.completedInteractionIDs == [[1], [2, 3]])
     }
 
     @Test
@@ -154,6 +184,44 @@ private enum MediaMonitorOperation: Equatable, Sendable {
     case read
     case writeVolume(Int)
     case writeMute(MuteState)
+}
+
+private struct ServiceMeasurementRecord: Equatable, Sendable {
+    let stage: ControlMeasurementStage
+    let interactionIDs: [UInt64]
+}
+
+private final class ServiceMeasurementRecords: Sendable {
+    private let records = Mutex<[ServiceMeasurementRecord]>([])
+
+    var startedInteractionIDs: [[UInt64]] {
+        interactionIDs(for: .commandStarted)
+    }
+
+    var enqueuedInteractionIDs: [[UInt64]] {
+        interactionIDs(for: .commandEnqueued)
+    }
+
+    var completedInteractionIDs: [[UInt64]] {
+        interactionIDs(for: .commandCompleted)
+    }
+
+    func append(stage: ControlMeasurementStage, context: ControlMeasurementContext) {
+        records.withLock {
+            $0.append(
+                ServiceMeasurementRecord(
+                    stage: stage,
+                    interactionIDs: context.interactionIDs.map(\.rawValue)
+                )
+            )
+        }
+    }
+
+    private func interactionIDs(for stage: ControlMeasurementStage) -> [[UInt64]] {
+        records.withLock {
+            $0.filter { $0.stage == stage }.map(\.interactionIDs)
+        }
+    }
 }
 
 private actor MediaScriptedMonitor: MonitorControlling {

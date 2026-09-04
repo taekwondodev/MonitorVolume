@@ -8,7 +8,8 @@ final class MonitorStatusModel {
     private let activeOutput: CoreAudioOutputRepository
     private let routingSnapshot: MediaKeyRoutingSnapshot
     private let mediaKeyInterceptor: MediaKeyInterceptor
-    private let osd = VolumeOSDPresenter()
+    private let osd: VolumeOSDPresenter
+    private let latencyRecorder: LatencyRecorder?
 
     private var latestRevision: UInt64?
     private var commandTask: Task<Void, Never>?
@@ -24,9 +25,15 @@ final class MonitorStatusModel {
     private(set) var draftVolume: VolumeLevel?
     private(set) var mediaKeyPermissionState: MediaKeyPermissionState
 
-    init(service: VolumeControlService, activeOutput: CoreAudioOutputRepository) {
+    init(
+        service: VolumeControlService,
+        activeOutput: CoreAudioOutputRepository,
+        latencyRecorder: LatencyRecorder? = nil
+    ) {
         self.service = service
         self.activeOutput = activeOutput
+        self.latencyRecorder = latencyRecorder
+        osd = VolumeOSDPresenter(latencyRecorder: latencyRecorder)
         let routingSnapshot = MediaKeyRoutingSnapshot()
         self.routingSnapshot = routingSnapshot
         mediaKeyInterceptor = MediaKeyInterceptor(routingSnapshot: routingSnapshot)
@@ -161,7 +168,10 @@ final class MonitorStatusModel {
         }
     }
 
-    private func runMediaCommand(_ command: MediaKeyCommand) {
+    private func runMediaCommand(
+        _ command: MediaKeyCommand,
+        measurementID: ControlMeasurementID?
+    ) {
         mediaCommandGeneration += 1
         let generation = mediaCommandGeneration
         let task = Task { [weak self] in
@@ -170,9 +180,9 @@ final class MonitorStatusModel {
             }
             switch command {
             case let .step(step):
-                await service.enqueueVolumeStep(step)
+                await service.enqueueVolumeStep(step, measurementID: measurementID)
             case .toggleMute:
-                await service.enqueueMuteToggle()
+                await service.enqueueMuteToggle(measurementID: measurementID)
             }
             let snapshot = await service.waitForPendingCommands()
             guard !Task.isCancelled else {
@@ -187,17 +197,42 @@ final class MonitorStatusModel {
     }
 
     private func presentOSD(for snapshot: MonitorSnapshot) {
-        guard snapshot.revision != lastOSDRevision,
-              case let .confirmed(.active, state) = snapshot.status else {
+        let interactionIDs = latencyRecorder?.takePendingPresentationIDs() ?? []
+        guard snapshot.revision != lastOSDRevision else {
             return
         }
         lastOSDRevision = snapshot.revision
-        osd.show(state)
+        guard case let .confirmed(.active, state) = snapshot.status else {
+            return
+        }
+        osd.show(
+            state,
+            interactionIDs: interactionIDs
+        )
+    }
+
+    private var confirmedMuteState: Bool? {
+        switch status {
+        case let .confirmed(_, state), let .commandFailure(_, state, _):
+            state.mute == .muted
+        case .unavailable, .failure, nil:
+            nil
+        }
     }
 }
 
 extension MonitorStatusModel: MediaKeyInterceptorDelegate {
     func mediaKeyInterceptor(_ interceptor: MediaKeyInterceptor, received command: MediaKeyCommand) {
-        runMediaCommand(command)
+        let measurementID = latencyRecorder?.beginInteraction(
+            command: command,
+            startingMuted: confirmedMuteState
+        )
+        if let measurementID {
+            latencyRecorder?.record(
+                stage: .commandEnqueueRequested,
+                interactionIDs: [measurementID]
+            )
+        }
+        runMediaCommand(command, measurementID: measurementID)
     }
 }

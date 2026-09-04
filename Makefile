@@ -1,7 +1,7 @@
 .DEFAULT_GOAL := help
 ROOT := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 
-.PHONY: help test check build verify clean
+.PHONY: help test check build verify measure-latency latency-report clean
 
 help:
 	@printf '%s\n' \
@@ -10,6 +10,8 @@ help:
 		'  make check   Run the strict Release build and tooling checks' \
 		'  make build   Build, sign, install, and launch the Release app' \
 		'  make verify  Verify the installed bundle and exact live process' \
+		'  make measure-latency  Install and arm Release latency capture' \
+		'  make latency-report   Validate and summarize the latest capture' \
 		'  make clean   Remove only SwiftPM build artifacts'
 
 test:
@@ -23,6 +25,12 @@ build:
 
 verify:
 	@"$(ROOT)scripts/verify-installed-app.sh"
+
+measure-latency:
+	@"$(ROOT)scripts/measure-latency.sh"
+
+latency-report:
+	@"$(ROOT)scripts/latency-report.sh"
 
 clean:
 	@cd "$(ROOT)" && swift package clean

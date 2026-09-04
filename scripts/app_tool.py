@@ -2,6 +2,7 @@
 
 import argparse
 import ast
+import hashlib
 import json
 import os
 import plistlib
@@ -13,6 +14,8 @@ import tempfile
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+from latency_report import build_latency_report, read_latency_evidence
 
 
 APP_NAME = "ProArt Volume"
@@ -200,8 +203,15 @@ def reconcile_backup(backup: Path) -> None:
     shutil.rmtree(backup)
 
 
-def launch_and_verify(bundle: Path, require_notices: bool = True) -> Dict[str, Any]:
-    run(["open", "-n", "-a", str(bundle)])
+def launch_and_verify(
+    bundle: Path,
+    require_notices: bool = True,
+    launch_arguments: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    command = ["open", "-n", "-a", str(bundle)]
+    if launch_arguments:
+        command.extend(["--args", *launch_arguments])
+    run(command)
     deadline = time.monotonic() + 10
     while time.monotonic() < deadline:
         if len(exact_processes(INSTALLED_EXECUTABLE)) == 1:
@@ -224,7 +234,7 @@ def rollback_install(backup: Path, replaced: bool, was_running: bool) -> None:
             launch_and_verify(INSTALLED_BUNDLE, require_notices=False)
 
 
-def install_and_launch() -> Dict[str, Any]:
+def install_and_launch(launch_arguments: Optional[List[str]] = None) -> Dict[str, Any]:
     applications = INSTALLED_BUNDLE.parent
     if applications.is_symlink():
         raise RuntimeError(f"Applications directory must not be a symlink: {applications}")
@@ -246,7 +256,7 @@ def install_and_launch() -> Dict[str, Any]:
             if replaced:
                 INSTALLED_BUNDLE.rename(backup)
             staged_bundle.rename(INSTALLED_BUNDLE)
-            verified = launch_and_verify(INSTALLED_BUNDLE)
+            verified = launch_and_verify(INSTALLED_BUNDLE, launch_arguments=launch_arguments)
         except Exception as install_error:
             try:
                 rollback_install(backup, replaced, bool(stopped))
@@ -293,13 +303,27 @@ def check_source() -> Dict[str, Any]:
         run(["bash", "-n", str(script)])
     python_files = [
         ROOT / "scripts" / "app_tool.py",
+        ROOT / "scripts" / "latency_report.py",
         ROOT / "Tests" / "Tooling" / "command_surface_test.py",
+        ROOT / "Tests" / "Tooling" / "latency_report_test.py",
         ROOT / ".hermes" / "skills" / "verify-proart-volume" / "scripts" / "verify.py",
     ]
     for path in python_files:
         ast.parse(path.read_text(), filename=str(path))
     load_metadata(SOURCE_PLIST)
-    run([sys.executable, str(ROOT / "Tests" / "Tooling" / "command_surface_test.py")], cwd=ROOT)
+    run(
+        [
+            sys.executable,
+            "-m",
+            "unittest",
+            "discover",
+            "-s",
+            str(ROOT / "Tests" / "Tooling"),
+            "-p",
+            "*_test.py",
+        ],
+        cwd=ROOT,
+    )
     return {
         "status": "passed",
         "c_transport_warnings_as_errors": True,
@@ -332,11 +356,89 @@ def probe_monitor_status() -> Dict[str, Any]:
     return result
 
 
+def current_revision() -> str:
+    revision = run(["git", "rev-parse", "HEAD"], cwd=ROOT).stdout.strip()
+    if len(revision) != 40 or any(character not in "0123456789abcdef" for character in revision):
+        raise RuntimeError("Git returned an invalid source revision")
+    return revision
+
+
+def arm_latency_measurement() -> Dict[str, Any]:
+    revision = current_revision()
+    evidence_directory = ROOT / ".hermes" / "verification" / "evidence" / f"latency-{time.time_ns()}"
+    evidence_directory.mkdir(parents=True)
+    evidence_path = evidence_directory / "trace.json"
+    try:
+        installed = install_and_launch(
+            [
+                "--latency-evidence",
+                str(evidence_path),
+                "--latency-revision",
+                revision,
+            ]
+        )
+        deadline = time.monotonic() + 5
+        evidence = None
+        while time.monotonic() < deadline:
+            if evidence_path.is_file():
+                try:
+                    evidence = read_latency_evidence(evidence_path, INSTALLED_EXECUTABLE)
+                    break
+                except RuntimeError:
+                    pass
+            time.sleep(0.1)
+        if evidence is None:
+            raise RuntimeError("The installed app did not arm latency evidence")
+        if evidence["metadata"].get("revision") != revision:
+            raise RuntimeError("Latency evidence revision does not match the installed build")
+        expected_hash = hashlib.sha256(INSTALLED_EXECUTABLE.read_bytes()).hexdigest()
+        if evidence["metadata"].get("executableSHA256") != expected_hash:
+            raise RuntimeError("Latency evidence executable hash does not match the installed build")
+    except Exception:
+        stop_installed_app()
+        raise
+    return {
+        **installed,
+        "status": "armed",
+        "evidence": str(evidence_path),
+        "revision": revision,
+        "instructions": [
+            "Wait two seconds for the initial monitor refresh.",
+            "If the monitor is muted, press mute once and wait two seconds.",
+            "Press volume up once and wait two seconds.",
+            "Press mute once and wait two seconds.",
+            "Press volume down once while muted and wait two seconds.",
+            "Press volume up, down, up, down rapidly, then wait two seconds.",
+            "Run make latency-report.",
+        ],
+    }
+
+
+def latest_latency_evidence() -> Path:
+    evidence_root = ROOT / ".hermes" / "verification" / "evidence"
+    candidates = sorted(evidence_root.glob("latency-*/trace.json"))
+    if not candidates:
+        raise RuntimeError("No latency evidence exists. Run make measure-latency first")
+    return candidates[-1]
+
+
+def latency_report() -> Dict[str, Any]:
+    return build_latency_report(latest_latency_evidence(), INSTALLED_EXECUTABLE)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "command",
-        choices=("build", "check", "probe-monitor-status", "stop", "verify"),
+        choices=(
+            "build",
+            "check",
+            "latency-report",
+            "measure-latency",
+            "probe-monitor-status",
+            "stop",
+            "verify",
+        ),
     )
     arguments = parser.parse_args()
     try:
@@ -344,6 +446,10 @@ def main() -> int:
             result = install_and_launch()
         elif arguments.command == "check":
             result = check_source()
+        elif arguments.command == "latency-report":
+            result = latency_report()
+        elif arguments.command == "measure-latency":
+            result = arm_latency_measurement()
         elif arguments.command == "probe-monitor-status":
             result = probe_monitor_status()
         elif arguments.command == "stop":
@@ -351,7 +457,7 @@ def main() -> int:
         else:
             result = {"status": "passed", **verify_bundle(INSTALLED_BUNDLE, require_live_process=True)}
         emit(result)
-        return 0
+        return 2 if result.get("status") == "incomplete" else 0
     except Exception as error:
         emit({"status": "failed", "error": str(error)})
         return 1

@@ -3,8 +3,8 @@ package actor VolumeControlService {
         case refresh
         case volume(VolumeLevel)
         case mute(MuteState)
-        case mediaVolumeAdjustment(Int)
-        case mediaMuteToggle
+        case mediaVolumeAdjustment(Int, [ControlMeasurementID])
+        case mediaMuteToggle([ControlMeasurementID])
 
         var isVolume: Bool {
             if case .volume = self {
@@ -20,19 +20,35 @@ package actor VolumeControlService {
             return false
         }
 
+        var measurementContext: ControlMeasurementContext? {
+            let interactionIDs: [ControlMeasurementID] = switch self {
+            case let .mediaVolumeAdjustment(_, interactionIDs), let .mediaMuteToggle(interactionIDs):
+                interactionIDs
+            case .refresh, .volume, .mute:
+                []
+            }
+            return interactionIDs.isEmpty ? nil : ControlMeasurementContext(interactionIDs: interactionIDs)
+        }
+
     }
 
     private let monitor: any MonitorControlling
     private let activeOutput: any ActiveAudioOutputReading
+    private let measurementObserver: ControlMeasurementObserver?
 
     private var revision: UInt64 = 0
     private var status: MonitorStatus = .unavailable
     private var pendingCommands: [PendingCommand] = []
     private var commandTask: Task<Void, Never>?
 
-    package init(monitor: any MonitorControlling, activeOutput: any ActiveAudioOutputReading) {
+    package init(
+        monitor: any MonitorControlling,
+        activeOutput: any ActiveAudioOutputReading,
+        measurementObserver: ControlMeasurementObserver? = nil
+    ) {
         self.monitor = monitor
         self.activeOutput = activeOutput
+        self.measurementObserver = measurementObserver
     }
 
     package func refresh() async -> MonitorSnapshot {
@@ -53,24 +69,33 @@ package actor VolumeControlService {
         startCommandTaskIfNeeded()
     }
 
-    package func enqueueVolumeStep(_ step: VolumeStep) {
+    package func enqueueVolumeStep(
+        _ step: VolumeStep,
+        measurementID: ControlMeasurementID? = nil
+    ) {
         guard !Task.isCancelled else {
             return
         }
         var adjustment = step.points
-        if case let .mediaVolumeAdjustment(points) = pendingCommands.last {
+        let enqueuedInteractionIDs = measurementID.map { [$0] } ?? []
+        var interactionIDs = enqueuedInteractionIDs
+        if case let .mediaVolumeAdjustment(points, pendingInteractionIDs) = pendingCommands.last {
             adjustment += points
+            interactionIDs = pendingInteractionIDs + interactionIDs
             pendingCommands.removeLast()
         }
-        pendingCommands.append(.mediaVolumeAdjustment(adjustment))
+        pendingCommands.append(.mediaVolumeAdjustment(adjustment, interactionIDs))
+        recordEnqueued(interactionIDs: enqueuedInteractionIDs)
         startCommandTaskIfNeeded()
     }
 
-    package func enqueueMuteToggle() {
+    package func enqueueMuteToggle(measurementID: ControlMeasurementID? = nil) {
         guard !Task.isCancelled else {
             return
         }
-        pendingCommands.append(.mediaMuteToggle)
+        let interactionIDs = measurementID.map { [$0] } ?? []
+        pendingCommands.append(.mediaMuteToggle(interactionIDs))
+        recordEnqueued(interactionIDs: interactionIDs)
         startCommandTaskIfNeeded()
     }
 
@@ -99,27 +124,49 @@ package actor VolumeControlService {
             return
         }
         commandTask = Task {
-            await drainCommands()
+            await self.drainCommands()
         }
+    }
+
+    private func recordEnqueued(interactionIDs: [ControlMeasurementID]) {
+        guard !interactionIDs.isEmpty else {
+            return
+        }
+        measurementObserver?.record(
+            .commandEnqueued,
+            context: ControlMeasurementContext(interactionIDs: interactionIDs)
+        )
     }
 
     private func drainCommands() async {
         while let command = pendingCommands.first {
             pendingCommands.removeFirst()
-            switch command {
-            case .refresh:
-                await performRefresh()
-            case let .volume(volume):
-                await performVolume(volume)
-            case let .mute(mute):
-                await performMute(mute)
-            case let .mediaVolumeAdjustment(points):
-                await performMediaVolumeAdjustment(points)
-            case .mediaMuteToggle:
-                await performMediaMuteToggle()
+            if let context = command.measurementContext {
+                measurementObserver?.record(.commandStarted, context: context)
+                await ControlMeasurementTaskContext.$current.withValue(context) {
+                    await perform(command)
+                }
+                measurementObserver?.record(.commandCompleted, context: context)
+            } else {
+                await perform(command)
             }
         }
         commandTask = nil
+    }
+
+    private func perform(_ command: PendingCommand) async {
+        switch command {
+        case .refresh:
+            await performRefresh()
+        case let .volume(volume):
+            await performVolume(volume)
+        case let .mute(mute):
+            await performMute(mute)
+        case let .mediaVolumeAdjustment(points, _):
+            await performMediaVolumeAdjustment(points)
+        case .mediaMuteToggle:
+            await performMediaMuteToggle()
+        }
     }
 
     private func performRefresh() async {

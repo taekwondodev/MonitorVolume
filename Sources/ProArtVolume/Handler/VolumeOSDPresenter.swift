@@ -11,17 +11,40 @@ final class VolumeOSDPresenter {
 
     private var panel: NSPanel?
     private var dismissTask: Task<Void, Never>?
+    private let latencyRecorder: LatencyRecorder?
+
+    init(latencyRecorder: LatencyRecorder? = nil) {
+        self.latencyRecorder = latencyRecorder
+    }
 
     isolated deinit {
         dismissTask?.cancel()
         panel?.close()
     }
 
-    func show(_ state: ConfirmedMonitorState) {
+    func show(
+        _ state: ConfirmedMonitorState,
+        interactionIDs: [ControlMeasurementID] = []
+    ) {
         dismissTask?.cancel()
 
         let panel = panel ?? makePanel()
-        panel.contentView = NSHostingView(rootView: VolumeOSDView(state: state))
+        latencyRecorder?.record(
+            stage: .osdPresentationRequested,
+            interactionIDs: interactionIDs
+        )
+        if let latencyRecorder {
+            panel.contentView = MeasuredVolumeHostingView(
+                rootView: VolumeOSDView(state: state)
+            ) {
+                latencyRecorder.record(
+                    stage: .osdFirstDrawCompleted,
+                    interactionIDs: interactionIDs
+                )
+            }
+        } else {
+            panel.contentView = NSHostingView(rootView: VolumeOSDView(state: state))
+        }
         panel.setFrameOrigin(origin(for: panel.frame.size))
         panel.alphaValue = 1
         panel.orderFrontRegardless()
@@ -69,5 +92,34 @@ final class VolumeOSDPresenter {
             x: visibleFrame.midX - size.width / 2,
             y: visibleFrame.maxY - size.height - Layout.topInset
         )
+    }
+}
+
+@MainActor
+private final class MeasuredVolumeHostingView: NSHostingView<VolumeOSDView> {
+    private let onFirstDraw: @MainActor () -> Void
+    private var hasRecordedFirstDraw = false
+
+    required init(rootView: VolumeOSDView) {
+        onFirstDraw = {}
+        super.init(rootView: rootView)
+    }
+
+    init(rootView: VolumeOSDView, onFirstDraw: @escaping @MainActor () -> Void) {
+        self.onFirstDraw = onFirstDraw
+        super.init(rootView: rootView)
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        guard !hasRecordedFirstDraw else {
+            return
+        }
+        hasRecordedFirstDraw = true
+        onFirstDraw()
     }
 }
