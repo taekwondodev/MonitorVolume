@@ -1,4 +1,5 @@
 import CoreAudio
+import Dispatch
 import Foundation
 
 package struct CoreAudioOutputRepository: ActiveAudioOutputReading {
@@ -18,6 +19,12 @@ package struct CoreAudioOutputRepository: ActiveAudioOutputReading {
         return name == Self.targetName
             && manufacturer == identity.manufacturer
             && transport == kAudioDeviceTransportTypeDisplayPort
+    }
+
+    package func observeDefaultOutputChanges(
+        _ handler: @escaping @Sendable () -> Void
+    ) throws(MonitorRepositoryError) -> ActiveAudioOutputObservation {
+        try ActiveAudioOutputObservation(handler: handler)
     }
 
     private func defaultOutputDevice() throws(MonitorRepositoryError) -> AudioObjectID {
@@ -84,5 +91,43 @@ package struct CoreAudioOutputRepository: ActiveAudioOutputReading {
             throw .readFailure
         }
         return value
+    }
+}
+
+package final class ActiveAudioOutputObservation: @unchecked Sendable {
+    private let address: AudioObjectPropertyAddress
+    private let queue: DispatchQueue
+    private let listener: AudioObjectPropertyListenerBlock
+
+    fileprivate init(handler: @escaping @Sendable () -> Void) throws(MonitorRepositoryError) {
+        address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultOutputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        queue = DispatchQueue(label: "dev.taekwondodev.ProArtVolume.default-output")
+        listener = { _, _ in
+            handler()
+        }
+        var registrationAddress = address
+        let status = AudioObjectAddPropertyListenerBlock(
+            AudioObjectID(kAudioObjectSystemObject),
+            &registrationAddress,
+            queue,
+            listener
+        )
+        guard status == noErr else {
+            throw .readFailure
+        }
+    }
+
+    deinit {
+        var removalAddress = address
+        AudioObjectRemovePropertyListenerBlock(
+            AudioObjectID(kAudioObjectSystemObject),
+            &removalAddress,
+            queue,
+            listener
+        )
     }
 }

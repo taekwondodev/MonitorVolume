@@ -8,6 +8,7 @@ struct MonitorStatusView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             statusContent
+            permissionContent
             Divider()
             Button("Quit ProArt Volume") {
                 NSApplication.shared.terminate(nil)
@@ -17,7 +18,19 @@ struct MonitorStatusView: View {
         .padding()
         .frame(width: 280)
         .task {
+            model.refreshMediaKeyPermissions()
             await model.refresh()
+        }
+    }
+
+    @ViewBuilder
+    private var permissionContent: some View {
+        if let explanation = model.mediaKeyPermissionState.explanation {
+            Label(explanation, systemImage: "keyboard.badge.ellipsis")
+                .foregroundStyle(.secondary)
+            Button("Enable Volume Keys") {
+                model.requestMediaKeyPermissions()
+            }
         }
     }
 

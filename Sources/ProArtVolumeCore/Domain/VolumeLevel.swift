@@ -16,4 +16,12 @@ package struct VolumeLevel: Equatable, Sendable {
         }
         self.init(integer)
     }
+
+    package func adjusting(by points: Int) -> VolumeLevel {
+        VolumeLevel(clamping: rawValue + min(100, max(-100, points)))
+    }
+
+    private init(clamping rawValue: Int) {
+        self.rawValue = min(100, max(0, rawValue))
+    }
 }

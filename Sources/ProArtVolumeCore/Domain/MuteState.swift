@@ -21,4 +21,13 @@ package enum MuteState: Equatable, Sendable {
             2
         }
     }
+
+    package var toggled: MuteState {
+        switch self {
+        case .muted:
+            .unmuted
+        case .unmuted:
+            .muted
+        }
+    }
 }

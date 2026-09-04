@@ -7,3 +7,4 @@
 | [Popover presentation](popover-presentation.md) | Select the ProArt Volume menu-bar item. | Current gap: requires visual confirmation. |
 | [Live monitor status](live-monitor-status.md) | Open the popover while the target monitor is connected. | The runtime skill records the shared Service/Repository result; presented state requires visual confirmation. |
 | [Panel hardware controls](panel-hardware-controls.md) | Use the installed volume slider or Mute switch. | Same-value hardware writes and read-back are automated; SwiftUI gestures and error presentation require visual confirmation. |
+| [Media-key routing](media-key-routing.md) | Press volume up, volume down, or mute. | Routing, saturation, aggregation, cancellation, serialization, and inactive no-DDC behavior are automated; permissions, hardware effect, pass-through, and native OSD require real-Mac confirmation. |

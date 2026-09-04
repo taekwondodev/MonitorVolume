@@ -7,11 +7,14 @@ struct ProArtVolumeApp: App {
 
     init() {
         let identity = MonitorIdentity.target
+        let activeOutput = CoreAudioOutputRepository(identity: identity)
         let service = VolumeControlService(
             monitor: DDCMonitorRepository(identity: identity),
-            activeOutput: CoreAudioOutputRepository(identity: identity)
+            activeOutput: activeOutput
         )
-        model = MonitorStatusModel(service: service)
+        let model = MonitorStatusModel(service: service, activeOutput: activeOutput)
+        model.activateMediaKeyControl()
+        self.model = model
     }
 
     var body: some Scene {

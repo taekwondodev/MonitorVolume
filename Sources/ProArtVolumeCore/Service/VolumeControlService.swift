@@ -3,6 +3,8 @@ package actor VolumeControlService {
         case refresh
         case volume(VolumeLevel)
         case mute(MuteState)
+        case mediaVolumeAdjustment(Int)
+        case mediaMuteToggle
 
         var isVolume: Bool {
             if case .volume = self {
@@ -17,6 +19,7 @@ package actor VolumeControlService {
             }
             return false
         }
+
     }
 
     private let monitor: any MonitorControlling
@@ -47,6 +50,27 @@ package actor VolumeControlService {
     package func enqueueMute(_ mute: MuteState) {
         pendingCommands.removeAll { $0.isMute }
         pendingCommands.append(.mute(mute))
+        startCommandTaskIfNeeded()
+    }
+
+    package func enqueueVolumeStep(_ step: VolumeStep) {
+        guard !Task.isCancelled else {
+            return
+        }
+        var adjustment = step.points
+        if case let .mediaVolumeAdjustment(points) = pendingCommands.last {
+            adjustment += points
+            pendingCommands.removeLast()
+        }
+        pendingCommands.append(.mediaVolumeAdjustment(adjustment))
+        startCommandTaskIfNeeded()
+    }
+
+    package func enqueueMuteToggle() {
+        guard !Task.isCancelled else {
+            return
+        }
+        pendingCommands.append(.mediaMuteToggle)
         startCommandTaskIfNeeded()
     }
 
@@ -89,6 +113,10 @@ package actor VolumeControlService {
                 await performVolume(volume)
             case let .mute(mute):
                 await performMute(mute)
+            case let .mediaVolumeAdjustment(points):
+                await performMediaVolumeAdjustment(points)
+            case .mediaMuteToggle:
+                await performMediaMuteToggle()
             }
         }
         commandTask = nil
@@ -139,6 +167,83 @@ package actor VolumeControlService {
         } catch let error {
             publish(.commandFailure(output: context.output, state: context.state, error: error))
         }
+    }
+
+    private func performMediaVolumeAdjustment(_ points: Int) async {
+        do {
+            guard try await activeOutput.isTargetActive() else {
+                publishInactiveContext()
+                return
+            }
+            guard let current = try await monitor.readState() else {
+                publish(.unavailable)
+                return
+            }
+            let requested = current.volume.adjusting(by: points)
+            do {
+                let confirmed = if requested == current.volume {
+                    current.volume
+                } else {
+                    try await monitor.writeVolume(requested)
+                }
+                let confirmedMute = if current.mute == .muted {
+                    try await monitor.writeMute(.unmuted)
+                } else {
+                    current.mute
+                }
+                publish(
+                    .confirmed(
+                        output: .active,
+                        state: ConfirmedMonitorState(volume: confirmed, mute: confirmedMute)
+                    )
+                )
+            } catch let error {
+                publish(.commandFailure(output: .active, state: current, error: error))
+            }
+        } catch let error {
+            publishMediaCommandFailure(error)
+        }
+    }
+
+    private func performMediaMuteToggle() async {
+        do {
+            guard try await activeOutput.isTargetActive() else {
+                publishInactiveContext()
+                return
+            }
+            guard let current = try await monitor.readState() else {
+                publish(.unavailable)
+                return
+            }
+            do {
+                let confirmed = try await monitor.writeMute(current.mute.toggled)
+                publish(
+                    .confirmed(
+                        output: .active,
+                        state: ConfirmedMonitorState(volume: current.volume, mute: confirmed)
+                    )
+                )
+            } catch let error {
+                publish(.commandFailure(output: .active, state: current, error: error))
+            }
+        } catch let error {
+            publishMediaCommandFailure(error)
+        }
+    }
+
+    private func publishInactiveContext() {
+        guard let context = confirmedContext else {
+            return
+        }
+        publish(.confirmed(output: .inactive, state: context.state))
+    }
+
+    private func publishMediaCommandFailure(_ error: MonitorRepositoryError) {
+        guard let context = confirmedContext else {
+            publish(.failure(error))
+            return
+        }
+        publish(.commandFailure(output: context.output, state: context.state, error: error))
     }
 
     private func confirmedContextForCommand() async -> (output: AudioOutputState, state: ConfirmedMonitorState)? {
