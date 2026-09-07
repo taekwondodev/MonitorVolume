@@ -1,7 +1,7 @@
 .DEFAULT_GOAL := help
 ROOT := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 
-.PHONY: help test check build verify measure-latency latency-report clean
+.PHONY: help test check build verify measure-latency latency-report offline-contract clean
 
 help:
 	@printf '%s\n' \
@@ -12,6 +12,7 @@ help:
 		'  make verify  Verify the installed bundle and exact live process' \
 		'  make measure-latency  Install and arm Release latency capture' \
 		'  make latency-report   Validate and summarize the latest capture' \
+		'  make offline-contract Run the non-invasive shared-contract comparison' \
 		'  make clean   Remove only SwiftPM build artifacts'
 
 test:
@@ -31,6 +32,9 @@ measure-latency:
 
 latency-report:
 	@"$(ROOT)scripts/latency-report.sh"
+
+offline-contract:
+	@"$(ROOT)scripts/offline-contract.sh"
 
 clean:
 	@cd "$(ROOT)" && swift package clean

@@ -1,13 +1,17 @@
 ---
 name: verify-proart-volume
-description: Use when verifying ProArt Volume's bundle, runtime presence, and monitor-status presentation.
+description: Use when verifying ProArt Volume's invisible lifecycle, media-key OSD, and explicit hardware proof.
 ---
 
 # Verify ProArt Volume
 
 Verify the installed Release application through the repository-owned build and verification scripts. The helper owns only durable JSON evidence and the exact process launched by the build command.
 
-## Quick proof
+## Doctor and ordinary verification
+
+Run `make test`, `make check`, and `make offline-contract` before installation. Use `make build` and `make verify` to install and check the real signed bundle and sole live process. Ordinary verification is non-invasive and does not prove hardware control, permission visibility, or OSD visuals.
+
+## Explicit hardware proof
 
 Run from the repository root:
 
@@ -19,7 +23,7 @@ A pass requires `status: passed`, a surviving evidence path, and no remaining ow
 
 ## Evidence
 
-Evidence lives under `.hermes/verification/evidence/<run-id>/launch.json`. It records the repository scripts' machine-readable build, bundle verification, and shared Service/Repository monitor-status results. A run passes only when the installed bundle has the expected stable identity and valid signature, exactly one process owns its executable path, and the target returns a confirmed bounded status with exact same-value read-back for volume and mute.
+Evidence lives under `.hermes/verification/evidence/<run-id>/launch.json`, with raw and validated hardware evidence in `hardware-*.json`. A pass requires bundle/process verification followed by actual volume/mute transitions and confirmed restorations. Nonzero probe results and malformed evidence remain failures and survive cleanup. See `references/features/hardware-proof.md` for the exact phase contract.
 
 ## Cleanup
 
@@ -27,8 +31,8 @@ Evidence lives under `.hermes/verification/evidence/<run-id>/launch.json`. It re
 
 ## Isolation
 
-The installed bundle, PA279CV DDC channel, and macOS user session are shared resources. The monitor-status drive performs real same-value volume and mute writes followed by read-back. Run this proof serially and only when replacing and briefly launching `~/Applications/ProArt Volume.app` and exercising the connected target is acceptable.
+The installed bundle, PA279CV DDC channel, and macOS user session are shared resources. The proof stops the exact app before starting the hardware writer. Run serially with no external app launches, builds, direct probes, or other monitor-control tools. The tooling lock excludes concurrent proof wrappers, not arbitrary hardware writers. Explicit proof changes volume and mute briefly and attempts restoration. Never induce unconfirmed restoration on the physical monitor.
 
 ## Capability map
 
-Read `references/features/README.md` before claiming coverage. Bundle launch, live Service/Repository status, and same-value hardware command confirmation are automated. Icon, popover controls, and error presentation remain explicit visual gaps.
+Read `references/features/README.md` before claiming coverage. The offline shared-contract drive is documented in `references/features/offline-comparison.md`; native permission/lifecycle scenarios and OSD visual acceptance remain live/manual obligations. Record each unexercised scenario rather than treating compilation, process liveness, synthetic traces, or a successful probe as a complete application proof.

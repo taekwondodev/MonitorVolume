@@ -2,7 +2,10 @@ import ProArtVolumeCore
 import SwiftUI
 
 struct VolumeOSDView: View {
-    let state: ConfirmedMonitorState
+    let state: VolumeIntent
+    var entered = true
+    var pulse = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var valueText: String {
         state.mute == .muted ? "Muted" : "\(state.volume.rawValue)%"
@@ -51,12 +54,16 @@ struct VolumeOSDView: View {
             }
         }
         .padding(18)
+        .opacity(pulse ? 0.65 : 1)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 24))
         .overlay {
             RoundedRectangle(cornerRadius: 24)
                 .stroke(.primary.tertiary, lineWidth: 1)
         }
         .padding(4)
+        .scaleEffect(reduceMotion || entered ? 1 : 0.985)
+        .animation(.easeOut(duration: 0.12), value: entered)
+        .animation(.easeOut(duration: 0.10), value: pulse)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("ASUS PA279CV volume")
         .accessibilityValue(valueText)

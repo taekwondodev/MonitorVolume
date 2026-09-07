@@ -40,10 +40,10 @@ struct MediaKeyRoutingTests {
     }
 
     @Test
-    func passesCorrespondingKeyUpWhenTargetBecameInactive() {
+    func consumesCorrespondingKeyUpWhenTargetBecameInactive() {
         var routing = MediaKeyRouting()
         _ = routing.decision(for: .init(key: .volumeUp, phase: .down), targetIsActive: true)
 
-        #expect(routing.decision(for: .init(key: .volumeUp, phase: .up), targetIsActive: false) == .passThrough)
+        #expect(routing.decision(for: .init(key: .volumeUp, phase: .up), targetIsActive: false) == .consumeKeyUp)
     }
 }

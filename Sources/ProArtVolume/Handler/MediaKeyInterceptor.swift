@@ -3,101 +3,93 @@ import ApplicationServices
 import Foundation
 import ProArtVolumeCore
 
-enum MediaKeyPermissionState: Equatable {
-    case granted
-    case missingInputMonitoring
-    case missingAccessibility
-    case missingInputMonitoringAndAccessibility
-
-    var explanation: String? {
-        switch self {
-        case .granted:
-            nil
-        case .missingInputMonitoring:
-            "Input Monitoring is required to see the three volume media keys."
-        case .missingAccessibility:
-            "Accessibility is required to intercept the three volume media keys."
-        case .missingInputMonitoringAndAccessibility:
-            "Input Monitoring and Accessibility are required only to intercept the three volume media keys."
-        }
-    }
-}
-
 @MainActor
 protocol MediaKeyInterceptorDelegate: AnyObject {
-    func mediaKeyInterceptor(_ interceptor: MediaKeyInterceptor, received command: MediaKeyCommand)
+    func mediaKeyInterceptor(_ interceptor: MediaKeyInterceptor, received command: MediaKeyCommand, session: ControlSession)
+    func mediaKeyInterceptorBecameUnavailable(_ interceptor: MediaKeyInterceptor)
 }
 
 @MainActor
 final class MediaKeyInterceptor {
     weak var delegate: (any MediaKeyInterceptorDelegate)?
 
-    private let routingSnapshot: MediaKeyRoutingSnapshot
+    private let eligibility: ControlEligibility
+    private let diagnostics: InputLifecycleDiagnostics?
+    private var diagnosticTap: UInt64 = 0
     private var routing = MediaKeyRouting()
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
 
-    private(set) var permissionState: MediaKeyPermissionState = .missingInputMonitoringAndAccessibility
-
-    init(routingSnapshot: MediaKeyRoutingSnapshot) {
-        self.routingSnapshot = routingSnapshot
+    var hasAccessibility: Bool {
+        let query = diagnostics?.beginQuery(.accessibility, tap: diagnosticTap)
+        let trusted = AXIsProcessTrustedWithOptions(nil)
+        diagnostics?.endQuery(query, value: trusted)
+        return trusted
     }
 
-    func refreshPermissions() {
-        let accessibility = AXIsProcessTrustedWithOptions(nil)
-        if accessibility {
-            start()
-            if eventTap != nil {
-                permissionState = .granted
-                return
-            }
-            permissionState = .missingInputMonitoring
-            stop()
-            return
-        }
+    init(eligibility: ControlEligibility, diagnostics: InputLifecycleDiagnostics?) {
+        self.eligibility = eligibility
+        self.diagnostics = diagnostics
+    }
 
-        let inputMonitoring = CGPreflightListenEventAccess()
-        permissionState = Self.permissionState(
-            inputMonitoring: inputMonitoring,
-            accessibility: accessibility
-        )
-        stop()
+    func refreshPermissions() -> Bool {
+        guard hasAccessibility else {
+            stop(reason: .missingAccessibility)
+            return false
+        }
+        if let eventTap {
+            let query = diagnostics?.beginQuery(.tapEnabled, tap: diagnosticTap)
+            let enabled = CGEvent.tapIsEnabled(tap: eventTap)
+            diagnostics?.endQuery(query, value: enabled)
+            if !enabled { stop(reason: .disabledTap) }
+        }
+        start()
+        return eventTap != nil
     }
 
     func requestPermissions() {
-        if !AXIsProcessTrustedWithOptions(nil) {
+        if !hasAccessibility {
+            let operation = diagnostics?.begin(.permissionPrompt, tap: diagnosticTap, reason: .reopen)
             _ = AXIsProcessTrustedWithOptions(["AXTrustedCheckOptionPrompt": true] as CFDictionary)
-        } else if eventTap == nil, !CGPreflightListenEventAccess() {
-            CGRequestListenEventAccess()
+            diagnostics?.end(operation)
         }
-        refreshPermissions()
     }
 
-    func stop() {
+    func stop(reason: InputLifecycleReason) {
+        let operation = (runLoopSource != nil || eventTap != nil)
+            ? diagnostics?.begin(.stop, tap: diagnosticTap, reason: reason)
+            : nil
         if let runLoopSource {
+            let removal = diagnostics?.begin(.sourceRemove, tap: diagnosticTap, reason: reason)
             CFRunLoopRemoveSource(CFRunLoopGetMain(), runLoopSource, .commonModes)
+            diagnostics?.end(removal)
         }
         if let eventTap {
+            let invalidation = diagnostics?.begin(.tapInvalidate, tap: diagnosticTap, reason: reason)
             CFMachPortInvalidate(eventTap)
+            diagnostics?.end(invalidation)
         }
         runLoopSource = nil
         eventTap = nil
         routing = MediaKeyRouting()
+        diagnostics?.end(operation)
+        diagnosticTap = 0
     }
 
     fileprivate func shouldPass(type: CGEventType, event: CGEvent) -> Bool {
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
-            if let eventTap {
-                CGEvent.tapEnable(tap: eventTap, enable: true)
-            }
+            diagnostics?.record(.tapDisabled(type == .tapDisabledByTimeout ? .timeout : .userInput, tap: diagnosticTap))
+            mediaKeyUnavailable()
             return true
         }
         let parsed = MediaKeyEventParser.parse(event)
-        switch routing.decision(for: parsed, targetIsActive: routingSnapshot.read()) {
+        let session = eligibility.session
+        switch routing.decision(for: parsed, targetIsActive: session != nil) {
         case .passThrough:
             return true
         case let .consumeKeyDown(command):
-            delegate?.mediaKeyInterceptor(self, received: command)
+            guard let session else { return true }
+            delegate?.mediaKeyInterceptor(self, received: command, session: session)
             return false
         case .consumeKeyUp:
             return false
@@ -109,6 +101,8 @@ final class MediaKeyInterceptor {
             return
         }
         let systemDefinedEventMask = CGEventMask(1) << 14
+        let creation = diagnostics?.begin(.tapCreate, reason: .tapUnavailable)
+        diagnosticTap = creation?.sequence ?? 0
         guard let tap = CGEvent.tapCreate(
             tap: .cgSessionEventTap,
             place: .headInsertEventTap,
@@ -116,30 +110,31 @@ final class MediaKeyInterceptor {
             eventsOfInterest: systemDefinedEventMask,
             callback: mediaKeyEventTapCallback,
             userInfo: Unmanaged.passUnretained(self).toOpaque()
-        ), let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0) else {
-            stop()
+        ) else {
+            diagnostics?.end(creation, result: .failed)
+            stop(reason: .creationFailure)
             return
         }
+        diagnostics?.end(creation)
+        let sourceCreation = diagnostics?.begin(.sourceCreate, tap: diagnosticTap, reason: .tapUnavailable)
+        guard let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0) else {
+            diagnostics?.end(sourceCreation, result: .failed)
+            stop(reason: .creationFailure)
+            return
+        }
+        diagnostics?.end(sourceCreation)
         eventTap = tap
         runLoopSource = source
+        let addition = diagnostics?.begin(.sourceAdd, tap: diagnosticTap, reason: .tapUnavailable)
         CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
+        diagnostics?.end(addition)
+        let enabling = diagnostics?.begin(.tapEnable, tap: diagnosticTap, reason: .tapUnavailable)
         CGEvent.tapEnable(tap: tap, enable: true)
+        diagnostics?.end(enabling)
     }
 
-    private static func permissionState(
-        inputMonitoring: Bool,
-        accessibility: Bool
-    ) -> MediaKeyPermissionState {
-        switch (inputMonitoring, accessibility) {
-        case (true, true):
-            .granted
-        case (false, true):
-            .missingInputMonitoring
-        case (true, false):
-            .missingAccessibility
-        case (false, false):
-            .missingInputMonitoringAndAccessibility
-        }
+    private func mediaKeyUnavailable() {
+        delegate?.mediaKeyInterceptorBecameUnavailable(self)
     }
 }
 

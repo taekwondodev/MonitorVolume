@@ -14,11 +14,5 @@ struct VolumeLevelTests {
         #expect(VolumeLevel(101) == nil)
     }
 
-    @Test
-    func acceptsOnlyFiniteWholeSliderValues() {
-        #expect(VolumeLevel(60.0)?.rawValue == 60)
-        #expect(VolumeLevel(60.5) == nil)
-        #expect(VolumeLevel(Double.nan) == nil)
-        #expect(VolumeLevel(Double.infinity) == nil)
-    }
+
 }

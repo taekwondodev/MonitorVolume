@@ -30,6 +30,10 @@ let package = Package(
             name: "ProArtVolumeRuntimeProbe",
             dependencies: ["ProArtVolumeCore"]
         ),
+        .executableTarget(
+            name: "ProArtVolumeOfflineHarness",
+            dependencies: ["ProArtVolumeCore"]
+        ),
         .testTarget(
             name: "ProArtVolumeTests",
             dependencies: ["ProArtVolume", "ProArtVolumeCore"]

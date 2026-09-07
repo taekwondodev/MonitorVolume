@@ -1,11 +1,11 @@
 import ProArtVolumeCore
-import SwiftUI
+import AppKit
 
 @main
-struct ProArtVolumeApp: App {
-    @State private var model: MonitorStatusModel
-
-    init() {
+enum ProArtVolumeApp {
+    @MainActor static func main() {
+        let app = NSApplication.shared
+        app.setActivationPolicy(.accessory)
         let identity = MonitorIdentity.target
         let activeOutput = CoreAudioOutputRepository(identity: identity)
         let latencyRecorder: LatencyRecorder?
@@ -29,26 +29,23 @@ struct ProArtVolumeApp: App {
             monitor = DDCMonitorRepository(identity: identity)
             serviceActiveOutput = activeOutput
         }
-        let service = VolumeControlService(
+        let eligibility = ControlEligibility()
+        let service = IntentControlService(
             monitor: monitor,
             activeOutput: serviceActiveOutput,
-            measurementObserver: latencyRecorder?.makeServiceObserver()
+            eligibility: eligibility,
+            observer: latencyRecorder?.makeServiceObserver()
         )
-        let model = MonitorStatusModel(
+        let coordinator = ApplicationCoordinator(
             service: service,
-            activeOutput: activeOutput,
-            latencyRecorder: latencyRecorder
+            output: activeOutput,
+            eligibility: eligibility,
+            recorder: latencyRecorder,
+            diagnostics: InputLifecycleDiagnostics.configured()
         )
-        model.activateMediaKeyControl()
-        self.model = model
-    }
-
-    var body: some Scene {
-        MenuBarExtra {
-            MonitorStatusView(model: model)
-        } label: {
-            Label(AppIdentity.name, systemImage: "speaker.wave.2")
+        app.delegate = coordinator
+        withExtendedLifetime(coordinator) {
+            app.run()
         }
-        .menuBarExtraStyle(.window)
     }
 }

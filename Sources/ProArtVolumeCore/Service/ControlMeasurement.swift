@@ -18,6 +18,8 @@ package enum ControlMeasurementStage: Sendable {
     case commandEnqueued
     case commandStarted
     case commandCompleted
+    case commandSuperseded
+    case commandDiscarded
 }
 
 package struct ControlMeasurementObserver: Sendable {

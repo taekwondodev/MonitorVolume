@@ -62,7 +62,7 @@ package struct MediaKeyRouting: Sendable {
             return .consumeKeyDown(event.key.command)
         case .up:
             let hasConsumedKeyDown = consumedKeyDowns.remove(event.key) != nil
-            return targetIsActive && hasConsumedKeyDown ? .consumeKeyUp : .passThrough
+            return hasConsumedKeyDown ? .consumeKeyUp : .passThrough
         }
     }
 }

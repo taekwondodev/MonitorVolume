@@ -210,6 +210,65 @@ class LatencyReportTests(unittest.TestCase):
         self.assertEqual(report["status"], "passed")
         self.assertEqual(report["rapid_run_length"], 4)
 
+    def test_archived_baseline_binds_original_path_and_preserved_bytes(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = self.write_evidence(directory, self.complete_events())
+            original_trace = path.read_bytes()
+            archive = Path(directory) / "archived-executable"
+            self.installed_executable.rename(archive)
+            report = build_latency_report(path, self.installed_executable, archived_executable=archive)
+            self.assertEqual(report["status"], "passed")
+            self.assertEqual(report["contract"], "historical_confirmed_feedback")
+            self.assertEqual(report["artifact_binding"]["mode"], "historical_archive")
+            self.assertEqual(report["artifact_binding"]["verified_artifact"], str(archive))
+            self.assertEqual(report["metadata"]["executablePath"], str(self.installed_executable))
+            self.assertEqual(report["interactions"][0]["accepted_to_first_draw_ms"], 600.0)
+            self.assertEqual(path.read_bytes(), original_trace)
+            with self.assertRaisesRegex(RuntimeError, "unreadable"):
+                build_latency_report(path, self.installed_executable)
+            self.installed_executable.write_bytes(b"replacement-installed-artifact")
+            with self.assertRaisesRegex(RuntimeError, "does not match"):
+                build_latency_report(path, self.installed_executable)
+            self.assertEqual(
+                build_latency_report(path, self.installed_executable, archived_executable=archive)["status"],
+                "passed",
+            )
+
+    def test_archive_rejects_wrong_path_wrong_bytes_and_missing_artifact(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = self.write_evidence(directory, self.complete_events())
+            archive = Path(directory) / "archived-executable"
+            self.installed_executable.rename(archive)
+            with self.assertRaisesRegex(RuntimeError, "does not identify"):
+                build_latency_report(path, archive, archived_executable=archive)
+            archive.write_bytes(b"wrong-archive")
+            with self.assertRaisesRegex(RuntimeError, "does not match"):
+                build_latency_report(path, self.installed_executable, archived_executable=archive)
+            archive.unlink()
+            with self.assertRaisesRegex(RuntimeError, "unreadable"):
+                build_latency_report(path, self.installed_executable, archived_executable=archive)
+
+    def test_archive_does_not_bypass_event_validation(self) -> None:
+        events = self.complete_events()
+        events[-1]["sequence"] = events[-2]["sequence"]
+        with tempfile.TemporaryDirectory() as directory:
+            path = self.write_evidence(directory, events)
+            archive = Path(directory) / "archived-executable"
+            self.installed_executable.rename(archive)
+            with self.assertRaisesRegex(RuntimeError, "event sequence"):
+                build_latency_report(path, self.installed_executable, archived_executable=archive)
+
+    def test_archive_cannot_stand_in_for_current_contract_proof(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = self.write_evidence(directory, self.complete_events())
+            evidence = json.loads(path.read_text())
+            evidence["metadata"]["schemaVersion"] = 2
+            path.write_text(json.dumps(evidence))
+            archive = Path(directory) / "archived-executable"
+            self.installed_executable.rename(archive)
+            with self.assertRaisesRegex(RuntimeError, "historical schema-1"):
+                build_latency_report(path, self.installed_executable, archived_executable=archive)
+
     def test_unrelated_command_is_rejected(self) -> None:
         events = self.complete_events()
         events[1]["command"] = "play_pause"

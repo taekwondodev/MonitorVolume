@@ -4,7 +4,7 @@ import SwiftUI
 struct VolumeLevelBar: View {
     static let height: CGFloat = 8
 
-    let state: ConfirmedMonitorState
+    let state: VolumeIntent
 
     private var progress: Double {
         state.mute == .muted ? 0 : Double(state.volume.rawValue) / 100

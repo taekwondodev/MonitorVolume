@@ -2,6 +2,7 @@
 
 import argparse
 import ast
+import fcntl
 import hashlib
 import json
 import os
@@ -16,6 +17,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from latency_report import build_latency_report, read_latency_evidence
+from hardware_proof import validate_hardware_proof
 
 
 APP_NAME = "ProArt Volume"
@@ -304,12 +306,16 @@ def check_source() -> Dict[str, Any]:
     python_files = [
         ROOT / "scripts" / "app_tool.py",
         ROOT / "scripts" / "latency_report.py",
+        ROOT / "scripts" / "hardware_proof.py",
+        ROOT / "scripts" / "offline_comparison.py",
         ROOT / "Tests" / "Tooling" / "command_surface_test.py",
         ROOT / "Tests" / "Tooling" / "latency_report_test.py",
+        ROOT / "Tests" / "Tooling" / "offline_comparison_test.py",
         ROOT / ".hermes" / "skills" / "verify-proart-volume" / "scripts" / "verify.py",
     ]
     for path in python_files:
         ast.parse(path.read_text(), filename=str(path))
+    run(["git", "diff", "--check"], cwd=ROOT)
     load_metadata(SOURCE_PLIST)
     run(
         [
@@ -328,32 +334,47 @@ def check_source() -> Dict[str, Any]:
         "status": "passed",
         "c_transport_warnings_as_errors": True,
         "release_strict_concurrency": True,
+        "git_diff_check": True,
         "shell_scripts_checked": [str(path.relative_to(ROOT)) for path in shell_scripts],
         "python_files_checked": [str(path.relative_to(ROOT)) for path in python_files],
     }
 
 
 def probe_monitor_status() -> Dict[str, Any]:
-    build_release()
-    executable = ROOT / ".build" / "release" / "ProArtVolumeRuntimeProbe"
-    if not executable.is_file() or not os.access(executable, os.X_OK):
-        raise RuntimeError(f"Runtime monitor probe is missing: {executable}")
-    probe = run([str(executable), "--verify-controls"], cwd=ROOT)
-    result = json.loads(probe.stdout)
-    if result.get("status") != "confirmed":
-        raise RuntimeError(f"Monitor status is not confirmed: {result.get('status')}")
-    if result.get("output") not in ("active", "inactive"):
-        raise RuntimeError("Monitor probe returned an invalid audio-output state")
-    if result.get("mute") not in ("muted", "unmuted"):
-        raise RuntimeError("Monitor probe returned an invalid mute state")
-    if result.get("volume_write_confirmed") is not True:
-        raise RuntimeError("Monitor probe did not confirm the volume write")
-    if result.get("mute_write_confirmed") is not True:
-        raise RuntimeError("Monitor probe did not confirm the mute write")
-    volume = result.get("volume")
-    if not isinstance(volume, int) or not 0 <= volume <= 100:
-        raise RuntimeError("Monitor probe returned an invalid volume")
-    return result
+    evidence_root = ROOT / ".hermes" / "verification" / "evidence"
+    evidence_root.mkdir(parents=True, exist_ok=True)
+    with (evidence_root.parent / "hardware-proof.lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        build_release()
+        executable = ROOT / ".build" / "release" / "ProArtVolumeRuntimeProbe"
+        if not executable.is_file() or not os.access(executable, os.X_OK):
+            raise RuntimeError(f"Runtime monitor probe is missing: {executable}")
+        stop_installed_app()
+        if exact_processes(INSTALLED_EXECUTABLE) or exact_processes(executable):
+            raise RuntimeError("A hardware owner is still running")
+        evidence_path = evidence_root / f"hardware-{time.time_ns()}.json"
+        evidence: Dict[str, Any] = {
+            "status": "failed",
+            "executableSHA256": hashlib.sha256(executable.read_bytes()).hexdigest(),
+            "installedExecutableSHA256": hashlib.sha256(INSTALLED_EXECUTABLE.read_bytes()).hexdigest(),
+        }
+        evidence_path.write_text(json.dumps(evidence, indent=2, sort_keys=True) + "\n")
+        try:
+            probe = subprocess.run([str(executable), "--verify-controls"], cwd=ROOT,
+                                   text=True, capture_output=True)
+            evidence.update(returncode=probe.returncode, stdout=probe.stdout, stderr=probe.stderr)
+            evidence_path.write_text(json.dumps(evidence, indent=2, sort_keys=True) + "\n")
+            report = json.loads(probe.stdout)
+            validate_hardware_proof(report)
+            evidence["report"] = report
+            if probe.returncode != (0 if report["status"] == "passed" else 5):
+                raise RuntimeError("Probe exit code disagrees with phase evidence")
+            evidence["status"] = report["status"]
+        except Exception as error:
+            evidence["error"] = str(error)
+        finally:
+            evidence_path.write_text(json.dumps(evidence, indent=2, sort_keys=True) + "\n")
+        return {**evidence, "evidence": str(evidence_path)}
 
 
 def current_revision() -> str:
@@ -457,7 +478,7 @@ def main() -> int:
         else:
             result = {"status": "passed", **verify_bundle(INSTALLED_BUNDLE, require_live_process=True)}
         emit(result)
-        return 2 if result.get("status") == "incomplete" else 0
+        return {"incomplete": 2, "failed": 1}.get(result.get("status", ""), 0)
     except Exception as error:
         emit({"status": "failed", "error": str(error)})
         return 1

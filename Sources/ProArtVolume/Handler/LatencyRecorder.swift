@@ -34,16 +34,19 @@ private struct LatencyRecorderState: Sendable {
     var nextSequence: UInt64 = 0
     var nextInteractionID: UInt64 = 0
     var events: [LatencyEvidenceEvent] = []
-    var pendingPresentationIDs: [ControlMeasurementID] = []
+
 }
 
 enum LatencyStage: String, Codable, Sendable {
     case sessionStarted = "session_started"
     case inputAccepted = "input_accepted"
+    case intentReduced = "intent_reduced"
     case commandEnqueueRequested = "command_enqueue_requested"
     case commandEnqueued = "command_enqueued"
     case serviceCommandStarted = "service_command_started"
     case serviceCommandCompleted = "service_command_completed"
+    case commandSuperseded = "command_superseded"
+    case commandDiscarded = "command_discarded"
     case activeOutputStarted = "active_output_started"
     case activeOutputCompleted = "active_output_completed"
     case ddcReadStarted = "ddc_read_started"
@@ -52,6 +55,7 @@ enum LatencyStage: String, Codable, Sendable {
     case ddcWriteReadBackCompleted = "ddc_write_read_back_completed"
     case osdPresentationRequested = "osd_presentation_requested"
     case osdFirstDrawCompleted = "osd_first_draw_completed"
+    case osdPresentationSuperseded = "osd_presentation_superseded"
 }
 
 enum LatencyCommand: String, Codable, Sendable {
@@ -168,7 +172,7 @@ final class LatencyRecorder: Sendable {
             .map { String(format: "%02x", $0) }
             .joined()
         metadata = LatencyEvidenceMetadata(
-            schemaVersion: 1,
+            schemaVersion: 2,
             startedAtUTC: ISO8601DateFormatter().string(from: Date()),
             revision: revision,
             executablePath: executableURL.path,
@@ -186,7 +190,7 @@ final class LatencyRecorder: Sendable {
             let timestamp = DispatchTime.now().uptimeNanoseconds
             state.nextInteractionID += 1
             let interactionID = ControlMeasurementID(state.nextInteractionID)
-            state.pendingPresentationIDs.append(interactionID)
+
             append(
                 stage: .inputAccepted,
                 interactionIDs: [interactionID],
@@ -201,12 +205,6 @@ final class LatencyRecorder: Sendable {
         }
     }
 
-    func takePendingPresentationIDs() -> [ControlMeasurementID] {
-        state.withLock { state in
-            defer { state.pendingPresentationIDs.removeAll(keepingCapacity: true) }
-            return state.pendingPresentationIDs
-        }
-    }
 
     func record(
         stage: LatencyStage,
@@ -239,6 +237,10 @@ final class LatencyRecorder: Sendable {
                 .serviceCommandStarted
             case .commandCompleted:
                 .serviceCommandCompleted
+            case .commandSuperseded:
+                .commandSuperseded
+            case .commandDiscarded:
+                .commandDiscarded
             }
             record(stage: latencyStage, context: context)
         }

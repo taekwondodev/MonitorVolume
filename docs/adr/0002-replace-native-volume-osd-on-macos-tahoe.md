@@ -2,11 +2,11 @@
 
 - Status: Accepted
 - Date: 2026-09-04
-- Tracking issue: [#5](https://github.com/taekwondodev/ProArtVolume/issues/5)
+- Tracking issues: [#5](https://github.com/taekwondodev/ProArtVolume/issues/5), superseded feedback contract in [#26](https://github.com/taekwondodev/ProArtVolume/issues/26)
 
 ## Context
 
-ProArt Volume routes Apple volume keys to the active ASUS PA279CV and receives the confirmed DDC volume or mute state after each hardware command. The user-visible OSD must represent that confirmed state rather than the Core Audio output value.
+ProArt Volume routes Apple volume keys to the active ASUS PA279CV. The original decision required DDC-confirmed feedback rather than the unrelated Core Audio value. Issue #26 explicitly supersedes confirmed-only content and presentation: accepted input owns immediate requested-intent feedback, while hardware confirmation remains internal and visually silent.
 
 The initial implementation loaded the private `OSD.framework` dynamically and invoked `OSDManager` with `showImage:onDisplayID:priority:msecUntilFade:filledChiclets:totalChiclets:locked:`. Runtime introspection on macOS 26.5 reported the method encoding `v48@0:8q16I24I28I32I36I40B44`, which matches the Objective-C call ABI used by the adapter.
 
@@ -24,18 +24,18 @@ The selector belongs to a private framework with no supported Apple contract. It
 
 ## Decision
 
-Remove the private `OSD.framework` adapter and present a non-activating app-owned SwiftUI HUD after confirmed active-output read-back.
+Keep the private `OSD.framework` adapter removed. Present the non-activating app-owned SwiftUI HUD immediately for accepted input after eligibility has been established from a trustworthy hardware seed. Do not wait for command read-back.
 
-The HUD appears on the screen containing the pointer at presentation time, with the main screen as fallback. It displays the configured monitor name, confirmed percentage or mute state, a matching speaker symbol, and a proportional bar. The panel does not accept input or activate ProArt Volume.
+The HUD chooses the pointer screen at burst presentation, with main-screen fallback, then keeps placement stable. It displays the configured monitor name, requested percentage or mute state, a matching speaker symbol, and a proportional bar. The panel does not accept input or activate ProArt Volume. Hardware success, failure, and recovery never correct or reopen it.
 
-Create the panel only when needed, reuse it across rapid confirmed updates, and release it after dismissal. Do not retain the inaccurate native OSD as a fallback.
+Create the panel only when needed, reuse it across rapid input, and release it after dismissal. Accepted input restarts the one-second inactivity baseline; boundary input pulses content without restarting entrance. Reduce Motion removes scale while retaining opacity. Do not retain the inaccurate native OSD as a fallback.
 
 ## Consequences
 
-The OSD can represent the DDC-confirmed monitor state accurately on macOS Tahoe and is no longer coupled to an undocumented renderer that reads unrelated Core Audio state.
+The OSD represents ordered user intent without transport delay and is not coupled to an undocumented renderer that reads unrelated Core Audio state. It is not a guarantee that a pending or uncertain hardware write succeeded.
 
 The app owns the HUD's visual fidelity, placement, accessibility, lifecycle, and compatibility. Its design should remain restrained and use adaptive system materials and symbols rather than imitating private implementation details.
 
-The HUD adds a short-lived AppKit panel and SwiftUI view. A disposable Release probe measured 0.0 percent idle CPU, an upper-bound resident-memory increase of 10.72 MiB with the panel created but hidden, and 11.67 MiB while visible. The integrated implementation avoids continuous updates and releases the panel after dismissal, so no persistent polling or helper process is introduced.
+The HUD adds a short-lived AppKit panel and SwiftUI view. Historical disposable Release measurements were 0.0 percent idle CPU and upper-bound resident-memory increases of 10.72 MiB hidden and 11.67 MiB visible. These are not measurements of the issue #26 implementation. The new lifecycle silently observes permission changes, releases the OSD after dismissal, and introduces no helper process.
 
-Future macOS releases may provide a supported API that can represent external values. Reintroducing a system-owned OSD requires runtime proof that it renders the supplied confirmed DDC state accurately, not only proof that a selector can be invoked.
+Future macOS releases may provide a supported API that can represent external values. Reintroducing a system-owned OSD requires runtime proof that it renders supplied external intent accurately, not only proof that a selector can be invoked. No native timing equivalence or numerical latency SLA is established by this decision.

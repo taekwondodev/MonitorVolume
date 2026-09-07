@@ -22,6 +22,10 @@ ALLOWED_STAGES = {
     "ddc_write_read_back_completed",
     "osd_presentation_requested",
     "osd_first_draw_completed",
+    "intent_reduced",
+    "command_superseded",
+    "command_discarded",
+    "osd_presentation_superseded",
 }
 ALLOWED_COMMANDS = {"volume_up", "volume_down", "toggle_mute"}
 EXPECTED_FIRST_FRAME_METRIC = "NSHostingView.draw_completed"
@@ -39,25 +43,32 @@ REQUIRED_INTERACTION_METRICS = (
 SUMMARY_METRICS = (*REQUIRED_INTERACTION_METRICS, "ddc_write_read_back_ms")
 
 
-def read_latency_evidence(path: Path, installed_executable: Path) -> Dict[str, Any]:
+def read_latency_evidence(
+    path: Path, installed_executable: Path, *, archived_executable: Optional[Path] = None,
+) -> Dict[str, Any]:
     try:
         evidence = json.loads(path.read_text())
     except (OSError, json.JSONDecodeError) as error:
         raise RuntimeError(f"Latency evidence is unreadable: {path}") from error
+    if not isinstance(evidence, dict):
+        raise RuntimeError("Latency evidence must be an object")
     metadata = evidence.get("metadata")
     events = evidence.get("events")
-    if not isinstance(metadata, dict) or metadata.get("schemaVersion") != 1:
+    if not isinstance(metadata, dict) or metadata.get("schemaVersion") not in (1, 2):
         raise RuntimeError("Latency evidence metadata is invalid")
     if metadata.get("firstFrameMetric") != EXPECTED_FIRST_FRAME_METRIC:
         raise RuntimeError("Latency evidence first-frame metric is invalid")
     if metadata.get("executablePath") != str(installed_executable):
         raise RuntimeError("Latency evidence does not identify the installed executable")
+    if archived_executable is not None and metadata["schemaVersion"] != 1:
+        raise RuntimeError("Archived executable binding requires a historical schema-1 trace")
+    artifact = installed_executable if archived_executable is None else archived_executable
     try:
-        executable_hash = hashlib.sha256(installed_executable.read_bytes()).hexdigest()
+        executable_hash = hashlib.sha256(artifact.read_bytes()).hexdigest()
     except OSError as error:
-        raise RuntimeError("The installed executable is unreadable") from error
+        raise RuntimeError("The bound executable artifact is unreadable") from error
     if metadata.get("executableSHA256") != executable_hash:
-        raise RuntimeError("Latency evidence does not match the installed executable")
+        raise RuntimeError("Latency evidence does not match the bound executable artifact")
     if not isinstance(events, list) or not events:
         raise RuntimeError("Latency evidence events are invalid")
     for event in events:
@@ -71,10 +82,12 @@ def validate_event(event: Any) -> None:
         raise RuntimeError("Latency evidence contains a non-object event")
     if event.get("stage") not in ALLOWED_STAGES:
         raise RuntimeError("Latency evidence contains an unknown stage")
-    if not isinstance(event.get("sequence"), int) or not isinstance(event.get("uptimeNanoseconds"), int):
+    if any(type(event.get(key)) is not int or event[key] < 0 for key in ("sequence", "uptimeNanoseconds")):
         raise RuntimeError("Latency evidence contains an invalid timestamp or sequence")
     interaction_ids = event.get("interactionIDs")
-    if not isinstance(interaction_ids, list) or any(not isinstance(value, int) for value in interaction_ids):
+    if (not isinstance(interaction_ids, list)
+            or any(type(value) is not int or value <= 0 for value in interaction_ids)
+            or len(interaction_ids) != len(set(interaction_ids))):
         raise RuntimeError("Latency evidence contains invalid interaction identifiers")
     command = event.get("command")
     if command is not None and command not in ALLOWED_COMMANDS:
@@ -210,8 +223,10 @@ def metric_summary(interactions: List[Dict[str, Any]], key: str) -> Dict[str, An
     }
 
 
-def build_latency_report(path: Path, installed_executable: Path) -> Dict[str, Any]:
-    evidence = read_latency_evidence(path, installed_executable)
+def build_latency_report(
+    path: Path, installed_executable: Path, *, archived_executable: Optional[Path] = None,
+) -> Dict[str, Any]:
+    evidence = read_latency_evidence(path, installed_executable, archived_executable=archived_executable)
     events = evidence["events"]
     accepted_events = sorted(
         (event for event in events if event["stage"] == "input_accepted"),
@@ -250,11 +265,15 @@ def build_latency_report(path: Path, installed_executable: Path) -> Dict[str, An
         for name, interaction_ids in scenario_interaction_ids.items()
     }
     missing_scenarios = [name for name, covered in coverage.items() if not covered]
+    required_metrics = REQUIRED_INTERACTION_METRICS if evidence["metadata"]["schemaVersion"] == 1 else (
+        "accepted_to_enqueue_request_ms", "accepted_to_osd_request_ms",
+    )
     missing_metrics = {
-        str(interaction["id"]): [key for key in REQUIRED_INTERACTION_METRICS if interaction[key] is None]
+        str(interaction["id"]): [key for key in required_metrics if interaction[key] is None]
         for interaction in interactions
-        if any(interaction[key] is None for key in REQUIRED_INTERACTION_METRICS)
+        if any(interaction[key] is None for key in required_metrics)
     }
+    intent_errors = validate_intent_trace(events) if evidence["metadata"]["schemaVersion"] == 2 else []
     missing_global_metrics = []
     if not any(interaction["ddc_write_read_back_ms"] is not None for interaction in interactions):
         missing_global_metrics.append("ddc_write_read_back_ms")
@@ -262,6 +281,7 @@ def build_latency_report(path: Path, installed_executable: Path) -> Dict[str, An
         not missing_scenarios
         and not missing_metrics
         and not missing_global_metrics
+        and not intent_errors
         and bool(interactions)
         and all(interaction["failed_stage_count"] == 0 for interaction in interactions)
     )
@@ -269,13 +289,129 @@ def build_latency_report(path: Path, installed_executable: Path) -> Dict[str, An
         "status": "passed" if complete else "incomplete",
         "evidence": str(path),
         "metadata": evidence["metadata"],
+        "artifact_binding": {
+            "mode": "installed" if archived_executable is None else "historical_archive",
+            "recorded_executable": str(installed_executable),
+            "verified_artifact": str(installed_executable if archived_executable is None else archived_executable),
+            "sha256": evidence["metadata"]["executableSHA256"],
+        },
         "coverage": coverage,
         "scenario_interaction_ids": scenario_interaction_ids,
         "scenario_summary": scenario_summary,
         "missing_scenarios": missing_scenarios,
         "missing_metrics_by_interaction": missing_metrics,
         "missing_global_metrics": missing_global_metrics,
+        "contract": "input_intent" if evidence["metadata"]["schemaVersion"] == 2 else "historical_confirmed_feedback",
+        "intent_errors": intent_errors,
+        "draws_while_hardware_busy": draws_while_hardware_busy(events),
         "rapid_run_length": rapid_run_length(accepted_events),
         "summary": {key: metric_summary(interactions, key) for key in SUMMARY_METRICS},
         "interactions": interactions,
     }
+
+
+def draws_while_hardware_busy(events: List[Dict[str, Any]]) -> int:
+    active = 0
+    draws = 0
+    for event in events:
+        if event["stage"] == "ddc_write_read_back_started":
+            active += 1
+        elif event["stage"] == "ddc_write_read_back_completed":
+            active -= 1
+        elif event["stage"] == "osd_first_draw_completed" and active > 0:
+            draws += 1
+    return draws
+
+
+def validate_intent_trace(events: List[Dict[str, Any]]) -> List[str]:
+    errors = []
+    accepted = [event for event in events if event["stage"] == "input_accepted"]
+    terminals = {"service_command_completed", "command_superseded", "command_discarded"}
+    pairs = {"active_output_started": "active_output_completed",
+             "ddc_read_started": "ddc_read_completed",
+             "ddc_write_read_back_started": "ddc_write_read_back_completed"}
+    active_operation = None
+    for event in events:
+        stage = event["stage"]
+        if stage == "session_started":
+            if event["interactionIDs"]:
+                errors.append("session start carries interaction data")
+            continue
+        if len(event["interactionIDs"]) != 1:
+            errors.append("intent stage must identify one interaction")
+        if stage in pairs:
+            if active_operation is not None:
+                errors.append("overlapping hardware operations")
+            active_operation = (pairs[stage], event["interactionIDs"])
+        elif stage in pairs.values():
+            if active_operation != (stage, event["interactionIDs"]):
+                errors.append("uncorrelated hardware completion")
+            active_operation = None
+            if event.get("outcome") not in ("success", "failure"):
+                errors.append("hardware completion lacks outcome")
+    if active_operation is not None:
+        errors.append("unfinished hardware operation")
+    for start in accepted:
+        identifier = start["interactionIDs"][0]
+        own = [event for event in events if identifier in event["interactionIDs"]]
+        stages = [event["stage"] for event in own]
+        prefix = f"interaction {identifier}: "
+        if start.get("command") not in ALLOWED_COMMANDS or type(start.get("startingMuted")) is not bool:
+            errors.append(prefix + "missing accepted-input context")
+        if own[0] != start:
+            errors.append(prefix + "stage precedes acceptance")
+        for required in ("input_accepted", "intent_reduced", "osd_presentation_requested", "command_enqueue_requested"):
+            if stages.count(required) != 1:
+                errors.append(prefix + f"expected one {required}")
+        def sequence(stage):
+            return next((event["sequence"] for event in own if event["stage"] == stage), None)
+
+        ordered = [sequence(stage) for stage in (
+            "input_accepted", "intent_reduced", "osd_presentation_requested", "command_enqueue_requested")]
+        if any(value is None for value in ordered) or ordered != sorted(value for value in ordered if value is not None):
+            errors.append(prefix + "invalid input/presentation ordering")
+        for unique in ("command_enqueued", "service_command_started"):
+            if stages.count(unique) > 1:
+                errors.append(prefix + "duplicate " + unique)
+        ending = [event for event in own if event["stage"] in terminals]
+        if len(ending) != 1:
+            errors.append(prefix + "missing or duplicate hardware disposition")
+        elif ending[0]["stage"] == "command_discarded":
+            errors.append(prefix + "intent was discarded, not confirmed")
+        else:
+            enqueue = sequence("command_enqueued")
+            begin = sequence("service_command_started")
+            end = ending[0]["sequence"]
+            if enqueue is None or enqueue <= (sequence("command_enqueue_requested") or 0) or end <= enqueue:
+                errors.append(prefix + "invalid enqueue/disposition ordering")
+            if ending[0]["stage"] == "service_command_completed" and (
+                begin is None or begin <= (enqueue or 0) or end <= begin
+            ):
+                errors.append(prefix + "completion lacks ordered hardware work")
+            for event in own:
+                if event["stage"] in pairs or event["stage"] in pairs.values():
+                    if begin is None or not begin < event["sequence"] < end:
+                        errors.append(prefix + "hardware event outside service ownership")
+            if ending[0]["stage"] == "command_superseded" and not any(
+                start["sequence"] < other["sequence"] < end for other in accepted
+            ):
+                errors.append(prefix + "supersession lacks newer input")
+        rendered = [event for event in own if event["stage"] in ("osd_first_draw_completed", "osd_presentation_superseded")]
+        if len(rendered) != 1 or rendered[0]["sequence"] <= (sequence("osd_presentation_requested") or 0):
+            errors.append(prefix + "missing or invalid draw disposition")
+        elif rendered[0]["stage"] == "osd_presentation_superseded" and not any(
+            event["stage"] == "osd_presentation_requested"
+            and event["interactionIDs"] != [identifier]
+            and (sequence("osd_presentation_requested") or 0) < event["sequence"] < rendered[0]["sequence"]
+            for event in events
+        ):
+            errors.append(prefix + "presentation supersession lacks newer request")
+        for before, after in (("active_output_started", "active_output_completed"),
+                              ("ddc_read_started", "ddc_read_completed"),
+                              ("ddc_write_read_back_started", "ddc_write_read_back_completed")):
+            if before in stages or after in stages:
+                if interval_milliseconds(own, before, after) is None:
+                    errors.append(prefix + "unpaired " + before)
+    if not draws_while_hardware_busy(events):
+        errors.append("no observed draw while hardware work was in progress")
+    return errors
