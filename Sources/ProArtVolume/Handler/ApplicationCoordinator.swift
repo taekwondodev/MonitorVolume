@@ -201,9 +201,14 @@ final class ApplicationCoordinator: NSObject, NSApplicationDelegate, MediaKeyInt
                 reopenAfterTapRelease = false
                 reopen()
             }
-        case .remainsUnavailable, .ignored:
+        case .remainsUnavailable:
             stopPermissionPolling()
             diagnostics?.record(.lifecycle(.wake, generation: eligibility.generation))
+        case .ignored:
+            diagnostics?.record(.lifecycle(.wake, generation: eligibility.generation))
+            if eligibility.allowsPermissionPolling {
+                startPermissionPolling()
+            }
         }
     }
 

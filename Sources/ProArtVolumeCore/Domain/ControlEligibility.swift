@@ -383,7 +383,7 @@ package final class ControlEligibility: Sendable {
             case .sleepingWhileUnavailable:
                 guard !state.tapOwnerActive else { return .waitingForTapRelease }
                 state.generation &+= 1
-                state.phase = .activeWithoutHardware
+                state.phase = .unavailable
                 return .remainsUnavailable(generation: state.generation)
             case .unavailable, .validating, .activeWithoutHardware, .eligible, .suspended:
                 return .ignored

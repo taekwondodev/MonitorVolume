@@ -290,9 +290,9 @@ struct ControlEligibilityTests {
             return
         }
         #expect(wakeGeneration > sleepingGeneration)
-        #expect(gate.phase == .activeWithoutHardware)
+        #expect(gate.phase == .unavailable)
         #expect(gate.session == nil)
-        #expect(gate.allowsPermissionPolling)
+        #expect(!gate.allowsPermissionPolling)
     }
 
     @Test

@@ -38,6 +38,7 @@ final class MediaKeyInterceptor {
     private var diagnosticTap: UInt64 = 0
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
+    private var isDeinitializing = false
     private let deliverySignal: MediaKeyDeliverySignal
     private var deliveryConsumer: Task<Void, Never>?
     private var suspensionNotification: Task<Void, Never>?
@@ -64,6 +65,7 @@ final class MediaKeyInterceptor {
     }
 
     isolated deinit {
+        isDeinitializing = true
         deliveryConsumer?.cancel()
         deliverySignal.finish()
         suspensionNotification?.cancel()
@@ -144,7 +146,7 @@ final class MediaKeyInterceptor {
         eligibility.releaseTap()
         diagnostics?.end(operation)
         diagnosticTap = 0
-        if ownerWasActive {
+        if ownerWasActive, !isDeinitializing {
             delegate?.mediaKeyInterceptorDidReleaseTap(self)
         }
     }
