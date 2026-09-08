@@ -32,7 +32,9 @@ final class ApplicationCoordinator: NSObject, NSApplicationDelegate, MediaKeyInt
     }
 
     isolated deinit {
-        permissionTask?.cancel()
+        stopped = true
+        reopenAfterTapRelease = false
+        stopPermissionPolling()
         interceptor.stop(reason: .deinitialization)
         NotificationCenter.default.removeObserver(self)
         NSWorkspace.shared.notificationCenter.removeObserver(self)
@@ -57,6 +59,7 @@ final class ApplicationCoordinator: NSObject, NSApplicationDelegate, MediaKeyInt
     func applicationWillTerminate(_ notification: Notification) {
         diagnostics?.record(.lifecycle(.termination, generation: eligibility.generation))
         stopped = true
+        reopenAfterTapRelease = false
         stopPermissionPolling()
         outputObservation = nil
         let generation = eligibility.invalidate()
@@ -191,7 +194,14 @@ final class ApplicationCoordinator: NSObject, NSApplicationDelegate, MediaKeyInt
             scheduleServiceValidation(generation: generation, reason: .wake, permitted: true)
         case .waitingForTapRelease:
             diagnostics?.record(.lifecycle(.wake, generation: eligibility.generation))
-        case .remainsSuspended, .remainsUnavailable, .ignored:
+        case .remainsSuspended:
+            stopPermissionPolling()
+            diagnostics?.record(.lifecycle(.wake, generation: eligibility.generation))
+            if reopenAfterTapRelease {
+                reopenAfterTapRelease = false
+                reopen()
+            }
+        case .remainsUnavailable, .ignored:
             stopPermissionPolling()
             diagnostics?.record(.lifecycle(.wake, generation: eligibility.generation))
         }
@@ -207,7 +217,7 @@ final class ApplicationCoordinator: NSObject, NSApplicationDelegate, MediaKeyInt
     }
 
     func mediaKeyInterceptorDidReleaseTap(_ interceptor: MediaKeyInterceptor) {
-        guard reopenAfterTapRelease else { return }
+        guard reopenAfterTapRelease, !sleeping else { return }
         reopenAfterTapRelease = false
         reopen()
     }

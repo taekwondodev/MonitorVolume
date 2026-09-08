@@ -91,6 +91,15 @@ struct ControlEligibilityTests {
         #expect(gate.route(.init(key: .volumeDown, phase: .up), at: 30) == .passThrough)
     }
 
+    @Test(arguments: [MediaKey.volumeUp, .volumeDown, .mute])
+    func keyUpPairingSurvivesEligibilityLoss(_ key: MediaKey) throws {
+        let gate = try eligibleGate()
+        _ = gate.route(.init(key: key, phase: .down), at: 10)
+        _ = gate.invalidate()
+
+        #expect(gate.route(.init(key: key, phase: .up), at: 20) == .consumeKeyUp)
+    }
+
     @Test
     func reopenWaitsForOldTapOwnerTeardown() throws {
         let gate = try eligibleGate()
