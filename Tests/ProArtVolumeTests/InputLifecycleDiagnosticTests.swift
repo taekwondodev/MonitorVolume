@@ -22,8 +22,16 @@ struct InputLifecycleDiagnosticTests {
             event: "operationEnded", name: "tapInvalidate", token: 4, tap: 7, result: "returned"))
         #expect(InputLifecycleEvent.tapDisabled(.userInput, tap: 7).fields == InputLifecycleFields(
             event: "tapDisabled", tap: 7, reason: "userInput"))
-
     }
+
+    @Test
+    func callbackAndHandoffFieldsPreserveDeliveryIdentity() {
+        #expect(InputLifecycleEvent.callbackEntered.fields == InputLifecycleFields(event: "callbackEntered"))
+        #expect(InputLifecycleEvent.callbackExited.fields == InputLifecycleFields(event: "callbackExited"))
+        #expect(InputLifecycleEvent.handoff(.admitted, generation: 9, deliverySequence: 3).fields == InputLifecycleFields(
+            event: "handoff", name: "admitted", token: 3, generation: 9))
+    }
+
 
     @Test func budgetEmitsExactlyOneExhaustionMarker() throws {
         var budget = InputLifecycleBudget()

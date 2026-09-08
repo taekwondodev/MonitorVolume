@@ -34,35 +34,3 @@ package struct MediaKeyEvent: Equatable, Sendable {
         self.phase = phase
     }
 }
-
-package enum MediaKeyRoutingDecision: Equatable, Sendable {
-    case passThrough
-    case consumeKeyDown(MediaKeyCommand)
-    case consumeKeyUp
-}
-
-package struct MediaKeyRouting: Sendable {
-    private var consumedKeyDowns: Set<MediaKey> = []
-
-    package init() {}
-
-    package mutating func decision(
-        for event: MediaKeyEvent?,
-        targetIsActive: Bool
-    ) -> MediaKeyRoutingDecision {
-        guard let event else {
-            return .passThrough
-        }
-        switch event.phase {
-        case .down:
-            guard targetIsActive else {
-                return .passThrough
-            }
-            consumedKeyDowns.insert(event.key)
-            return .consumeKeyDown(event.key.command)
-        case .up:
-            let hasConsumedKeyDown = consumedKeyDowns.remove(event.key) != nil
-            return hasConsumedKeyDown ? .consumeKeyUp : .passThrough
-        }
-    }
-}

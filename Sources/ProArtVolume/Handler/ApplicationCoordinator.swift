@@ -12,10 +12,11 @@ final class ApplicationCoordinator: NSObject, NSApplicationDelegate, MediaKeyInt
     private let diagnostics: InputLifecycleDiagnostics?
     private var reducer = VolumeIntentReducer()
     private var permissionTask: Task<Void, Never>?
+    private var permissionPollingGeneration: UInt64 = 0
     private var outputObservation: ActiveAudioOutputObservation?
-    private var permitted = false
     private var sleeping = false
     private var stopped = false
+    private var reopenAfterTapRelease = false
 
     init(service: IntentControlService, output: CoreAudioOutputRepository,
          eligibility: ControlEligibility, recorder: LatencyRecorder?, diagnostics: InputLifecycleDiagnostics?) {
@@ -46,12 +47,6 @@ final class ApplicationCoordinator: NSObject, NSApplicationDelegate, MediaKeyInt
         workspace.addObserver(self, selector: #selector(willSleep), name: NSWorkspace.willSleepNotification, object: nil)
         workspace.addObserver(self, selector: #selector(didWake), name: NSWorkspace.didWakeNotification, object: nil)
         reopen()
-        permissionTask = Task { [weak self] in
-            while !Task.isCancelled {
-                do { try await Task.sleep(for: .seconds(1)) } catch { return }
-                self?.observePermission()
-            }
-        }
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
@@ -62,18 +57,28 @@ final class ApplicationCoordinator: NSObject, NSApplicationDelegate, MediaKeyInt
     func applicationWillTerminate(_ notification: Notification) {
         diagnostics?.record(.lifecycle(.termination, generation: eligibility.generation))
         stopped = true
-        permissionTask?.cancel()
-        permissionTask = nil
+        stopPermissionPolling()
         outputObservation = nil
+        let generation = eligibility.invalidate()
         interceptor.stop(reason: .termination)
-        revalidate(generation: eligibility.invalidate(), reason: .termination)
+        scheduleServiceValidation(generation: generation, reason: .termination, permitted: false)
         diagnostics?.record(.sessionEnded)
     }
 
     private func reopen() {
-        diagnostics?.record(.lifecycle(.reopen, generation: eligibility.generation))
+        guard !stopped, !sleeping else { return }
+        guard case let .started(generation) = eligibility.reopen() else {
+            if eligibility.phase.isSuspended {
+                reopenAfterTapRelease = true
+            }
+            return
+        }
+        reopenAfterTapRelease = false
+        diagnostics?.record(.lifecycle(.reopen, generation: generation))
         interceptor.requestPermissions()
-        revalidate(generation: eligibility.invalidate(), reason: .reopen)
+        guard interceptor.open(generation: generation, permissionFailure: .missingPermission) else { return }
+        startPermissionPolling()
+        scheduleServiceValidation(generation: generation, reason: .reopen, permitted: true)
     }
 
     private func observePermission() {
@@ -83,22 +88,63 @@ final class ApplicationCoordinator: NSObject, NSApplicationDelegate, MediaKeyInt
             diagnostics?.record(.pollSkipped(sleeping ? .sleeping : .stopped))
             return
         }
-        observeOutput()
-        let available = interceptor.refreshPermissions()
-        if available != permitted || outputObservation == nil {
-            revalidate(generation: eligibility.invalidate(), reason: .permissionPoll)
+        guard eligibility.allowsPermissionPolling else {
+            stopPermissionPolling()
+            return
+        }
+        guard interceptor.validateActive(generation: eligibility.generation) else {
+            stopPermissionPolling()
+            return
         }
     }
 
-    private func revalidate(generation: UInt64, reason: InputLifecycleReason) {
+    private func startPermissionPolling() {
+        guard permissionTask == nil else { return }
+        permissionPollingGeneration &+= 1
+        let pollingGeneration = permissionPollingGeneration
+        permissionTask = Task { @MainActor [weak self] in
+            defer {
+                if let self, self.permissionPollingGeneration == pollingGeneration {
+                    self.permissionTask = nil
+                }
+            }
+            while !Task.isCancelled {
+                do {
+                    try await Task.sleep(for: .seconds(1))
+                } catch {
+                    return
+                }
+                guard let self,
+                      !self.stopped,
+                      !self.sleeping,
+                      self.eligibility.allowsPermissionPolling else {
+                    return
+                }
+                self.observePermission()
+            }
+        }
+    }
+
+    private func stopPermissionPolling() {
+        permissionPollingGeneration &+= 1
+        permissionTask?.cancel()
+        permissionTask = nil
+    }
+
+    private func revalidateHardware(reason: InputLifecycleReason) {
+        guard !stopped, !sleeping, eligibility.allowsPermissionPolling else { return }
+        let generation = eligibility.invalidate()
+        scheduleServiceValidation(generation: generation, reason: reason, permitted: true)
+    }
+
+    private func scheduleServiceValidation(generation: UInt64, reason: InputLifecycleReason, permitted: Bool) {
         diagnostics?.record(.revalidation(.entered, reason, generation: generation))
         guard generation == eligibility.generation else {
             diagnostics?.record(.revalidation(.staleDiscarded, reason, generation: generation))
             return
         }
-        permitted = !stopped && !sleeping && interceptor.refreshPermissions() && outputObservation != nil
+        let permitted = permitted && !stopped && !sleeping && eligibility.phase.isLifecycleActive
         let service = service
-        let permitted = permitted
         Task { await service.revalidate(generation: generation, permitted: permitted) }
         diagnostics?.record(.revalidation(.serviceScheduled, reason, generation: generation))
     }
@@ -107,40 +153,68 @@ final class ApplicationCoordinator: NSObject, NSApplicationDelegate, MediaKeyInt
         guard outputObservation == nil else { return }
         let eligibility = eligibility
         outputObservation = try? output.observeDefaultOutputChanges { [weak self, eligibility] in
-            let generation = eligibility.invalidate()
             Task { @MainActor [weak self] in
-                self?.diagnostics?.record(.lifecycle(.outputChanged, generation: generation))
-                self?.revalidate(generation: generation, reason: .outputChanged)
+                guard let self,
+                      eligibility.allowsPermissionPolling,
+                      !self.stopped,
+                      !self.sleeping else { return }
+                self.diagnostics?.record(.lifecycle(.outputChanged, generation: eligibility.generation))
+                self.revalidateHardware(reason: .outputChanged)
             }
         }
     }
 
     @objc private func displayChanged() {
+        guard !stopped, !sleeping, eligibility.allowsPermissionPolling else { return }
         diagnostics?.record(.lifecycle(.displayChanged, generation: eligibility.generation))
-        revalidate(generation: eligibility.invalidate(), reason: .displayChanged)
+        revalidateHardware(reason: .displayChanged)
     }
 
     @objc private func willSleep() {
-        diagnostics?.record(.lifecycle(.sleep, generation: eligibility.generation))
+        guard !stopped, !sleeping else { return }
         sleeping = true
+        stopPermissionPolling()
+        let generation = eligibility.sleep()
+        diagnostics?.record(.lifecycle(.sleep, generation: generation))
         interceptor.stop(reason: .sleep)
-        revalidate(generation: eligibility.invalidate(), reason: .sleep)
+        scheduleServiceValidation(generation: generation, reason: .sleep, permitted: false)
     }
 
     @objc private func didWake() {
-        diagnostics?.record(.lifecycle(.wake, generation: eligibility.generation))
+        guard sleeping, !stopped else { return }
         sleeping = false
-        revalidate(generation: eligibility.invalidate(), reason: .wake)
+        switch eligibility.wake() {
+        case let .revalidate(generation):
+            diagnostics?.record(.lifecycle(.wake, generation: generation))
+            guard interceptor.open(generation: generation, permissionFailure: .permissionRevoked) else { return }
+            startPermissionPolling()
+            scheduleServiceValidation(generation: generation, reason: .wake, permitted: true)
+        case .waitingForTapRelease:
+            diagnostics?.record(.lifecycle(.wake, generation: eligibility.generation))
+        case .remainsSuspended, .remainsUnavailable, .ignored:
+            stopPermissionPolling()
+            diagnostics?.record(.lifecycle(.wake, generation: eligibility.generation))
+        }
     }
 
-    func mediaKeyInterceptorBecameUnavailable(_ interceptor: MediaKeyInterceptor) {
-        let generation = eligibility.invalidate()
-        permitted = false
-        diagnostics?.record(.revalidation(.requested, .tapUnavailable, generation: generation))
-        Task { @MainActor [weak self] in self?.revalidate(generation: generation, reason: .tapUnavailable) }
+    func mediaKeyInterceptor(_ interceptor: MediaKeyInterceptor, requestedSuspension reason: InputSuspensionReason) {
+        stopPermissionPolling()
+        let generation = eligibility.generation
+        let lifecycleReason = Self.lifecycleReason(for: reason)
+        diagnostics?.record(.revalidation(.requested, lifecycleReason, generation: generation))
+        interceptor.stop(reason: lifecycleReason)
+        scheduleServiceValidation(generation: generation, reason: lifecycleReason, permitted: false)
     }
 
-    func mediaKeyInterceptor(_ interceptor: MediaKeyInterceptor, received command: MediaKeyCommand, session: ControlSession) {
+    func mediaKeyInterceptorDidReleaseTap(_ interceptor: MediaKeyInterceptor) {
+        guard reopenAfterTapRelease else { return }
+        reopenAfterTapRelease = false
+        reopen()
+    }
+
+    func mediaKeyInterceptor(_ interceptor: MediaKeyInterceptor, received delivery: AdmittedMediaKey) {
+        let command = delivery.command
+        let session = delivery.session
         let prior = reducer.startingIntent(for: session)
         let id = recorder?.beginInteraction(command: command, startingMuted: prior.mute == .muted)
         let request = reducer.accept(command, session: session, measurementID: id)
@@ -150,5 +224,20 @@ final class ApplicationCoordinator: NSObject, NSApplicationDelegate, MediaKeyInt
         recorder?.record(stage: .commandEnqueueRequested, interactionIDs: ids)
         let service = service
         Task { await service.submit(request) }
+    }
+
+    private static func lifecycleReason(for reason: InputSuspensionReason) -> InputLifecycleReason {
+        switch reason {
+        case .missingPermission:
+            .missingAccessibility
+        case .permissionRevoked:
+            .permissionRevoked
+        case .tapDisabledByTimeout, .tapDisabledByUserInput:
+            .disabledTap
+        case .deliveryOverflow:
+            .deliveryOverflow
+        case .tapCreationFailed:
+            .creationFailure
+        }
     }
 }

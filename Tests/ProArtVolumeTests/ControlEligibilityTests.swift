@@ -43,6 +43,17 @@ struct ControlEligibilityTests {
     }
 
     @Test
+    func repeatedSuspensionDoesNotReplaceTheLatchedGenerationOrReason() throws {
+        let gate = try eligibleGate()
+
+        let firstGeneration = gate.suspend(.permissionRevoked)
+        let repeatedGeneration = gate.suspend(.deliveryOverflow)
+
+        #expect(repeatedGeneration == firstGeneration)
+        #expect(gate.phase == .suspended(.permissionRevoked))
+    }
+
+    @Test
     func passThroughAfterOverflowDiscardsHeldDeliveryAndPassesTheRejectedKey() throws {
         let gate = try eligibleGate(capacity: 2)
         let first = gate.route(.init(key: .volumeUp, phase: .down), at: 10)
@@ -130,6 +141,33 @@ struct ControlEligibilityTests {
         #expect(gate.snapshot.metrics.completedCount == 1)
     }
 
+    @Test(arguments: [MediaKey.volumeUp, .volumeDown, .mute])
+    func activeKeyDownsConsumeAndMatchingKeyUpsRemainPaired(_ key: MediaKey) throws {
+        let gate = try eligibleGate()
+
+        guard case .consumeKeyDown = gate.route(.init(key: key, phase: .down), at: 10) else {
+            Issue.record("active key-down must be admitted")
+            return
+        }
+        #expect(gate.route(.init(key: key, phase: .up), at: 20) == .consumeKeyUp)
+    }
+
+    @Test
+    func unmatchedKeyUpPassesThrough() throws {
+        let gate = try eligibleGate()
+
+        #expect(gate.route(.init(key: .volumeUp, phase: .up), at: 10) == .passThrough)
+    }
+
+    @Test
+    func activeTapPassesNewInputThroughWhileHardwareIsUnavailable() throws {
+        let gate = try eligibleGate()
+        _ = gate.invalidate()
+
+        #expect(gate.phase == .activeWithoutHardware)
+        #expect(gate.route(.init(key: .volumeUp, phase: .down), at: 10) == .passThrough)
+    }
+
     @Test
     func activeWakeRequiresFreshValidationAndSuspendedWakeDoesNotReopen() throws {
         let gate = try eligibleGate()
@@ -194,6 +232,18 @@ struct ControlEligibilityTests {
         gate.publish(session)
         #expect(gate.claimTapOwner(generation: generation))
         #expect(gate.route(.init(key: .volumeUp, phase: .down), at: 20) != .passThrough)
+    }
+
+    @Test
+    func invalidatingActiveOwnerKeepsPermissionPollingLifecycleActive() throws {
+        let gate = try eligibleGate()
+
+        _ = gate.invalidate()
+
+        #expect(gate.phase == .activeWithoutHardware)
+        #expect(gate.session == nil)
+        #expect(gate.allowsPermissionPolling)
+        #expect(gate.snapshot.tapOwnerActive)
     }
 
     @Test

@@ -191,7 +191,7 @@ package final class ControlEligibility: Sendable {
             case .sleepingWhileUnavailable:
                 state.phase = .sleepingWhileUnavailable
             case .unavailable, .validating, .activeWithoutHardware, .eligible:
-                state.phase = .unavailable
+                state.phase = state.tapOwnerActive ? .activeWithoutHardware : .unavailable
             }
             discardQueued(&state)
             return state.generation
@@ -236,6 +236,7 @@ package final class ControlEligibility: Sendable {
     @discardableResult
     package func suspend(_ reason: InputSuspensionReason) -> UInt64 {
         state.withLock { state in
+            guard !state.phase.isSuspended else { return state.generation }
             state.generation &+= 1
             state.phase = .suspended(reason)
             discardQueued(&state)

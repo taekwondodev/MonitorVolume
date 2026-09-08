@@ -15,7 +15,7 @@ enum InputLifecycleConfiguration: Equatable {
 enum InputLifecycleReason: String, Sendable {
     case launch, reopen, permissionPoll, outputChanged, displayChanged
     case sleep, wake, termination, deinitialization, tapUnavailable
-    case missingAccessibility, disabledTap, creationFailure
+    case missingAccessibility, permissionRevoked, disabledTap, deliveryOverflow, creationFailure
 }
 
 enum InputLifecycleOperation: String, Sendable {
@@ -55,6 +55,14 @@ enum InputLifecycleDisableReason: String, Sendable {
     case timeout, userInput
 }
 
+enum InputLifecycleHandoff: String, Sendable {
+    case admitted
+    case pairedKeyUp
+    case passedThrough
+    case overflow
+    case staleDiscarded
+}
+
 enum InputLifecycleEvent: Equatable, Sendable {
     case sessionStarted
     case sessionEnded
@@ -63,6 +71,9 @@ enum InputLifecycleEvent: Equatable, Sendable {
     case revalidation(InputLifecycleRevalidation, InputLifecycleReason, generation: UInt64)
     case pollSkipped(InputLifecycleSkip)
     case tapDisabled(InputLifecycleDisableReason, tap: UInt64)
+    case callbackEntered
+    case callbackExited
+    case handoff(InputLifecycleHandoff, generation: UInt64, deliverySequence: UInt64)
     case operationBegan(InputLifecycleOperationToken, InputLifecycleReason)
     case operationEnded(InputLifecycleOperationToken, InputLifecycleOperationResult)
     case queryBegan(InputLifecycleQueryToken)
@@ -81,6 +92,12 @@ enum InputLifecycleEvent: Equatable, Sendable {
             .init(event: "pollSkipped", reason: reason.rawValue)
         case let .tapDisabled(reason, tap):
             .init(event: "tapDisabled", tap: tap, reason: reason.rawValue)
+        case .callbackEntered:
+            .init(event: "callbackEntered")
+        case .callbackExited:
+            .init(event: "callbackExited")
+        case let .handoff(result, generation, deliverySequence):
+            .init(event: "handoff", name: result.rawValue, token: deliverySequence, generation: generation)
         case let .operationBegan(token, reason):
             .init(event: "operationBegan", name: token.kind.rawValue, token: token.sequence,
                   tap: token.tap, reason: reason.rawValue)
