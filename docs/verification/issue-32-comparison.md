@@ -25,6 +25,8 @@ Authority: issues #28 and #32, ADR 0003, and `scripts/issue32_collection_protoco
 - Each repaired candidate was built from its isolated repair worktree. Every run retains the exact source closure and executable hash.
 - The committed Candidate A source closure matches all 36 SHA-256 file bindings retained by campaign v2; the committed Candidate B source closure matches all 37. The commits therefore bind the exact measured source bytes without rerunning or mutating the campaign.
 
+Campaign v2's retained `sourceRef` and `resolvedSourceRef` fields name the historical input refs, while each retained `sourceClosure` names the bytes actually compiled from the then-dirty repair worktree. The historical commits contain only 22 of the 36 and 37 measured file versions, respectively, so those ref fields must not be read as commit-to-bytes identity. The new repaired refs close that delivery gap by containing every measured source-closure byte.
+
 The experiment uses disposable candidate-bound conformance executables. It does not install or launch the app bundle.
 
 ## Campaign history
@@ -111,6 +113,8 @@ All 20 stress rounds, in both full and inactive instrumentation modes, report th
 | Peak outstanding | 8 | 1 |
 
 Candidate A accumulates to capacity, overflows, latches suspension, and discards its queued deliveries. Candidate B drains between requests and completes all 16 commands. Normal repeated and mixed bursts also produce different peak occupancy.
+
+Candidate B therefore never reaches the configured capacity in this comparative stress phase: its real scheduling path drains at a peak outstanding count of one. This table is not equal-saturation evidence for Candidate B. The separate deterministic conformance matrix proves the configured-capacity contract; the comparative table records how each topology behaved under the shared stress workload.
 
 The shared typed input sequence is identical, and every candidate report reconciles its own accounting identities. The difference is therefore a repeatable candidate-topology observation, not missing data or corrupt evidence.
 
