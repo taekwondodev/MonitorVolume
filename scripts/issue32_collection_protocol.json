@@ -1,0 +1,354 @@
+{
+  "schemaVersion": 1,
+  "status": "frozenBeforeComparativeCollection",
+  "candidates": {
+    "A": {
+      "sourceRef": "84f674d36fec021cf25ebbbc561dc60d312b1923",
+      "topology": "mainActor"
+    },
+    "B": {
+      "sourceRef": "ae62d45586793495a052e25403b9cd748ac8715d",
+      "topology": "dedicatedOwnerThread"
+    }
+  },
+  "build": {
+    "product": "ProArtVolumeIssue32Conformance",
+    "configuration": "release",
+    "strictConcurrency": "complete",
+    "buildOncePerCandidate": true,
+    "rebuildDuringMeasuredCollection": false,
+    "requireStableSourceClosureAndExecutableHashes": true
+  },
+  "artifactBinding": {
+    "retainProtocolFile": true,
+    "retainProtocolSha256": true,
+    "configurationDigestIncludesProtocolSha256": true,
+    "requireOneExecutableSha256PerCandidateAcrossAllRuns": true
+  },
+  "gate": {
+    "capacity": 8,
+    "phaseDurationMilliseconds": 40,
+    "pollIntervalMilliseconds": 10,
+    "clockSource": "parentObservedPythonMonotonicNanoseconds",
+    "cpuSource": "procPidRusageV0CumulativeCpuTimeDeltaOverParentMonotonicInterval",
+    "rssSource": "procPidRusageV0ResidentSizeBytes",
+    "missingDataPolicy": "retainFailedAndCensored;excludeFromNumericSummary",
+    "candidateProcessTimeoutSeconds": 30,
+    "terminationGraceSeconds": 2
+  },
+  "watchdogs": {
+    "apparatusInvocationTimeoutSeconds": 90,
+    "buildTimeoutSeconds": 300,
+    "environmentCommandTimeoutSeconds": 30,
+    "environmentProbeBuildTimeoutSeconds": 60
+  },
+  "instrumentation": {
+    "modes": [
+      "full",
+      "none"
+    ],
+    "fullAndNoneObservationSemanticsMustMatch": true,
+    "noneMustEmitNoDetailedEvents": true
+  },
+  "workloads": {
+    "normal": {
+      "phaseOrder": [
+        "activeIdle",
+        "isolatedInput",
+        "repeatedBurst",
+        "mixedBurst",
+        "delayedConsumer",
+        "suspension",
+        "sleepWake",
+        "cleanup"
+      ],
+      "repeatedBurstCycles": 4,
+      "includesOverflowStress": false
+    },
+    "stress": {
+      "phaseOrder": [
+        "activeIdle",
+        "isolatedInput",
+        "repeatedBurst",
+        "mixedBurst",
+        "delayedConsumer",
+        "overflowStress",
+        "suspension",
+        "sleepWake",
+        "cleanup"
+      ],
+      "repeatedBurstCycles": 16,
+      "includesOverflowStress": true
+    }
+  },
+  "environment": {
+    "samePhysicalHost": true,
+    "sameOSBuildAndSwiftToolchain": true,
+    "powerSource": "ac",
+    "lowPowerMode": false,
+    "requiredThermalStateAtBlockStartAndEnd": "nominal",
+    "powerSourceObservation": "retain and parse /usr/bin/pmset -g batt at every block boundary; require AC Power",
+    "lowPowerModeObservation": "retain and parse the AC Power section of /usr/bin/pmset -g custom at every block boundary; require lowpowermode 0",
+    "thermalObservation": "record Foundation ProcessInfo.thermalState at every block boundary; require nominal",
+    "hostObservation": "retain sw_vers, uname -m, sysctl hw.model, and sysctl hw.logicalcpu before warmup and after the final measured block",
+    "preBlockStabilizationMilliseconds": 5000,
+    "betweenRunsCooldownMilliseconds": 1000,
+    "forbidConcurrentBuildTestAndDeliberateLoad": true,
+    "recordLogicalCpuCount": true,
+    "recordHostOsToolchainPowerAndThermalMetadata": true,
+    "retainEveryObservation": true,
+    "forbidAppInstallLaunchPermissionChangesNativeInputAndHardware": true
+  },
+  "warmup": {
+    "runsPerCandidateWorkloadInstrumentation": 1,
+    "retainEvidence": true,
+    "excludeFromNumericSummariesAndSelection": true,
+    "scheduleConditionOrder": [
+      "A/full",
+      "B/full",
+      "A/none",
+      "B/none"
+    ],
+    "workloadOrder": [
+      "normal",
+      "stress"
+    ]
+  },
+  "measuredCollection": {
+    "rounds": 20,
+    "minimumValidRunsPerCandidateWorkloadInstrumentation": 20,
+    "runsPerCandidateWorkloadInstrumentation": 20,
+    "totalMeasuredRuns": 160,
+    "workloadOrderByRoundParity": {
+      "odd": [
+        "normal",
+        "stress"
+      ],
+      "even": [
+        "stress",
+        "normal"
+      ]
+    },
+    "conditionOrderCycle": [
+      [
+        "A/full",
+        "B/full",
+        "A/none",
+        "B/none"
+      ],
+      [
+        "B/full",
+        "A/full",
+        "B/none",
+        "A/none"
+      ],
+      [
+        "A/none",
+        "B/none",
+        "A/full",
+        "B/full"
+      ],
+      [
+        "B/none",
+        "A/none",
+        "B/full",
+        "A/full"
+      ]
+    ],
+    "retainEveryRunAndOrdinal": true,
+    "crossCandidateExecution": "blockedUntilOfflineGatesAndControlsPass"
+  },
+  "sampleDefinitions": {
+    "run": "one complete validated candidate process report under one workload and instrumentation mode",
+    "bridgeRoundTripNanoseconds": "typedBridgeReturned uptime minus its immediately preceding typedBridgeRequested uptime for the same phase and input",
+    "consumerDrainDelayNanoseconds": "consumerDrained uptime minus the final typedBridgeReturned uptime in the same input phase",
+    "cpuIntervalPercentOneCore": "one hundred times the proc_pid_rusage cumulative user-plus-system CPU delta divided by the parent monotonic wall interval; 100 percent equals one fully utilized logical core",
+    "cpuIntervalPercentMachineCapacity": "cpuIntervalPercentOneCore divided by the recorded active logical CPU count",
+    "residentSizeBytes": "instantaneous proc_pid_rusage ri_resident_size at a sampled parent timestamp",
+    "baselineResidentSizeBytes": "last wholly attributed resident-size sample in activeIdle",
+    "retainedResidentSizeBytes": "last wholly attributed resident-size sample in suspension and cleanup, reported separately",
+    "phaseAttribution": "a sample timestamp and the full preceding CPU interval must lie within the parent-observed phase range"
+  },
+  "minimumTimingSamplesPerValidRun": {
+    "bridgeRoundTripNanoseconds": {
+      "isolatedInput": 2,
+      "normalRepeatedBurst": 8,
+      "stressRepeatedBurst": 32,
+      "mixedBurst": 6
+    },
+    "consumerDrainDelayNanoseconds": {
+      "isolatedInput": 1,
+      "repeatedBurst": 1,
+      "mixedBurst": 1
+    }
+  },
+  "summaryDefinitions": {
+    "timing": [
+      "sampleCount",
+      "median",
+      "nearestRankP95",
+      "maximum"
+    ],
+    "cpu": [
+      "intervalCount",
+      "meanOneCorePercent",
+      "maximumOneCorePercent",
+      "meanMachineCapacityPercent",
+      "maximumMachineCapacityPercent"
+    ],
+    "memory": [
+      "sampleCount",
+      "baselineResidentSizeBytes",
+      "medianResidentSizeBytes",
+      "maximumResidentSizeBytes",
+      "retainedResidentSizeBytes"
+    ],
+    "accounting": [
+      "attempted",
+      "admitted",
+      "delivered",
+      "passedThrough",
+      "rejected",
+      "discarded",
+      "failed",
+      "censored"
+    ],
+    "outlierPolicy": "retainAndReportAllFiniteObservations"
+  },
+  "requiredMetrics": {
+    "exactEveryRun": [
+      "scenarioMatrix",
+      "topology",
+      "availability",
+      "phaseOrder",
+      "inputEventCount",
+      "passedThroughEventCount",
+      "deliveredCommandCount",
+      "admissionAttempted",
+      "admitted",
+      "rejected",
+      "discarded",
+      "overflow",
+      "completed",
+      "peakOutstanding",
+      "pending",
+      "failedPollCount",
+      "censoredCount",
+      "sourceAndArtifactBindings"
+    ],
+    "fullInstrumentationTimingByWorkload": {
+      "phases": [
+        "isolatedInput",
+        "repeatedBurst",
+        "mixedBurst"
+      ],
+      "minimumSamplesPerRun": {
+        "isolatedInput": {
+          "normal": 2,
+          "stress": 2
+        },
+        "repeatedBurst": {
+          "normal": 8,
+          "stress": 32
+        },
+        "mixedBurst": {
+          "normal": 6,
+          "stress": 6
+        },
+        "consumerDrainDelayPerPhase": 1
+      },
+      "bridgeRoundTripNanoseconds": [
+        "sampleCount",
+        "median",
+        "nearestRankP95",
+        "maximum"
+      ],
+      "consumerDrainDelayNanoseconds": [
+        "sampleCount",
+        "median",
+        "nearestRankP95",
+        "maximum"
+      ]
+    },
+    "processResourcesEveryPhaseByWorkloadAndInstrumentation": [
+      "cpuIntervalCount",
+      "meanCpuIntervalPercentOneCore",
+      "maximumCpuIntervalPercentOneCore",
+      "meanCpuIntervalPercentMachineCapacity",
+      "medianResidentSizeBytes",
+      "maximumResidentSizeBytes"
+    ],
+    "memoryRetentionByWorkloadAndInstrumentation": [
+      "baselineResidentSizeBytesAtActiveIdleEnd",
+      "retainedResidentSizeBytesAtSuspensionEnd",
+      "retainedResidentSizeBytesAtCleanupEnd"
+    ],
+    "instrumentationOverheadByCandidateAndWorkload": [
+      "fullMinusNoneMeanCpuIntervalPercentOneCoreByPhase",
+      "fullMinusNoneMaximumCpuIntervalPercentOneCoreByPhase",
+      "fullMinusNoneMaximumResidentSizeBytesByPhase"
+    ],
+    "stressResultsRemainSeparate": true
+  },
+  "missingData": {
+    "retainRawFailedAndCensoredObservations": true,
+    "numericImputation": "none",
+    "excludeFailedAndCensoredFromNumericSummaries": true,
+    "invalidatePairOnMissingRequiredMetric": true,
+    "maximumReplacementPairedRoundsPerConfiguration": 2,
+    "retainInvalidAndReplacementRuns": true,
+    "afterReplacementLimit": "inconclusive"
+  },
+  "equivalence": {
+    "comparisonUnit": "same round workload instrumentation phase and metric",
+    "lowerIsBetterMetrics": [
+      "bridgeRoundTripNanoseconds",
+      "consumerDrainDelayNanoseconds",
+      "cpuIntervalPercentOneCore",
+      "residentSizeBytes"
+    ],
+    "bootstrapResamples": 10000,
+    "bootstrapSeed": 320032,
+    "confidenceInterval": 0.95,
+    "centerStatistic": "medianOfPairedBMinusADifferences",
+    "minimumSuccessiveDifferencesPerCandidateConfiguration": 19,
+    "repeatabilityNoiseBand": "maximum candidate median absolute difference between the 19 successive valid same-configuration run summaries",
+    "equivalent": "the full bootstrap confidence interval lies inside plus-or-minus the repeatability noise band",
+    "candidateBBetter": "the bootstrap confidence interval upper bound is below the negative repeatability noise band",
+    "candidateABetter": "the bootstrap confidence interval lower bound is above the positive repeatability noise band",
+    "otherwise": "inconclusive",
+    "normalAndStressReportedSeparately": true,
+    "noFixedLatencySlaOrInventedPracticalMargin": true
+  },
+  "selection": {
+    "correctnessAvailabilityAndEvidenceIntegrityMustBeExact": true,
+    "candidateAAtMeasurableParity": true,
+    "selectA": "every required metric is equivalent or favors A, with no metric favoring B",
+    "selectB": "at least one required metric favors B, every other required metric is equivalent or favors B, and lifecycle ownership review has no blocker",
+    "inconclusive": "required evidence is missing, a required metric is indeterminate, or required metrics favor different candidates",
+    "stressCannotBeRelabeledAsNormalUse": true,
+    "nativeClaimsRemainUnavailable": true
+  },
+  "stopConditions": {
+    "immediate": [
+      "candidate ref, source closure, executable, driver, matrix, runner, or protocol digest mismatch",
+      "nonzero child exit or any validation, scenario, topology, availability, ordering, accounting, or summary-reconstruction failure",
+      "a phase lacks a resource sample or wholly contained CPU interval",
+      "configuration, capacity, workload, instrumentation semantics, compiler, host, OS, power, or thermal condition changes",
+      "an evidence directory already exists or any evidence write fails"
+    ],
+    "pairedRoundInvalidButReplaceable": [
+      "failed or censored observation removes a required numeric sample",
+      "unplanned concurrent load or scheduling interruption is observed"
+    ],
+    "neverOverride": "preserve all evidence and report inconclusive after the replacement limit; never continue to live testing"
+  },
+  "reporting": {
+    "reportEveryPredeclaredMetric": true,
+    "reportNormalAndStressSeparately": true,
+    "reportInstrumentationOverheadByCandidateAndWorkload": true,
+    "reportVariabilityFailuresCensoringAndReplacementRuns": true,
+    "labelOfflineTypedBridgeAndProcessResourceBoundary": true,
+    "neverClaimNativeCoreGraphicsAccessibilityAppKitDDCSystemInputOrInstalledAppBehavior": true
+  }
+}

@@ -307,14 +307,23 @@ def check_source() -> Dict[str, Any]:
         ROOT / "scripts" / "app_tool.py",
         ROOT / "scripts" / "latency_report.py",
         ROOT / "scripts" / "hardware_proof.py",
-        ROOT / "scripts" / "offline_comparison.py",
+        ROOT / "scripts" / "issue32_apparatus.py",
+        ROOT / "scripts" / "issue32_collector.py",
+        ROOT / "scripts" / "issue32_collection_protocol.py",
+        ROOT / "scripts" / "offline_policy_probe.py",
+        ROOT / "scripts" / "issue32_conformance.py",
         ROOT / "Tests" / "Tooling" / "command_surface_test.py",
         ROOT / "Tests" / "Tooling" / "latency_report_test.py",
-        ROOT / "Tests" / "Tooling" / "offline_comparison_test.py",
+        ROOT / "Tests" / "Tooling" / "issue32_apparatus_test.py",
+        ROOT / "Tests" / "Tooling" / "issue32_collector_test.py",
+        ROOT / "Tests" / "Tooling" / "issue32_collection_protocol_test.py",
         ROOT / ".hermes" / "skills" / "verify-proart-volume" / "scripts" / "verify.py",
     ]
     for path in python_files:
         ast.parse(path.read_text(), filename=str(path))
+    json.loads((ROOT / "scripts" / "issue32_expected_scenarios.json").read_text())
+    json.loads((ROOT / "scripts" / "issue32_collection_protocol.json").read_text())
+    run(["swiftc", "-parse", str(ROOT / "scripts" / "Issue32EnvironmentProbe.swift")])
     run(["git", "diff", "--check"], cwd=ROOT)
     load_metadata(SOURCE_PLIST)
     run(

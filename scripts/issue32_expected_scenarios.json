@@ -1,0 +1,155 @@
+{
+  "availability": [
+    {
+      "metric": "nativeCoreGraphicsSchedulingAndTimeout",
+      "status": "unavailable",
+      "reason": "The typed feed enters after native parsing and cannot observe native callback scheduling, timeout behavior, or tap creation."
+    },
+    {
+      "metric": "typedBridge",
+      "status": "measured",
+      "reason": "Requested and returned observations bracket the candidate-owned typed bridge."
+    },
+    {
+      "metric": "admissionToConsumer",
+      "status": "measured",
+      "reason": "Consumer-drained observations follow the candidate-owned drain path."
+    },
+    {
+      "metric": "osdFacing",
+      "status": "modeled",
+      "reason": "Delegate delivery is observed before any AppKit presentation."
+    },
+    {
+      "metric": "appKitOSDRenderingAndScanout",
+      "status": "unavailable",
+      "reason": "The conformance executable does not present AppKit UI or observe display scanout."
+    },
+    {
+      "metric": "accessibilityIdentityAndPrompts",
+      "status": "unavailable",
+      "reason": "The offline apparatus does not query Accessibility or display permission prompts."
+    },
+    {
+      "metric": "ordinarySystemInputEffectsAndRestoration",
+      "status": "unavailable",
+      "reason": "No native tap or system input is exercised, so owner teardown does not prove input-path restoration."
+    },
+    {
+      "metric": "physicalDDC",
+      "status": "unavailable",
+      "reason": "The candidate-bound conformance target does not invoke DDC Service or physical hardware."
+    },
+    {
+      "metric": "installedApplicationResources",
+      "status": "unavailable",
+      "reason": "Process samples describe only the disposable conformance executable, not an installed application process."
+    },
+    {
+      "metric": "nativeWakeupCounters",
+      "status": "unavailable",
+      "reason": "The offline gate records process CPU and resident memory but does not collect native wakeup counters."
+    }
+  ],
+  "scenarios": [
+    {
+      "name": "typedBridge",
+      "values": {
+        "capacity": "8",
+        "deliveries": "volumeUp",
+        "downPasses": "false",
+        "releaseNotifications": "1",
+        "unsupportedPasses": "true",
+        "upPasses": "false"
+      }
+    },
+    {
+      "name": "staleDiagnostic",
+      "values": {
+        "count": "1",
+        "currentGeneration": "2",
+        "observedGeneration": "1",
+        "phase": "activeWithoutHardware",
+        "reason": "disabledTap"
+      }
+    },
+    {
+      "name": "pendingReopen",
+      "values": {
+        "pendingWakeStartsFreshGeneration": "true",
+        "releaseWhileSleepingCompletes": "false",
+        "repeatedRequestsConverge": "true",
+        "terminationCancels": "true",
+        "wakeWithoutPendingReopens": "false"
+      }
+    },
+    {
+      "name": "fifoPairing",
+      "values": {
+        "deliveries": "volumeUp,mute,volumeDown",
+        "downPasses": "false,false,false",
+        "upPasses": "false,false,false"
+      }
+    },
+    {
+      "name": "capacityOverflow",
+      "values": {
+        "admitted": "8",
+        "admittedPasses": "false,false,false,false,false,false,false,false",
+        "attempted": "9",
+        "completed": "0",
+        "deliveries": "",
+        "discarded": "8",
+        "overflow": "1",
+        "overflowPasses": "true",
+        "pairedUpPasses": "false",
+        "peakOutstanding": "8",
+        "pending": "0",
+        "phase": "suspended",
+        "rejected": "1"
+      }
+    },
+    {
+      "name": "stalePresentation",
+      "values": {
+        "admitted": "1",
+        "attempted": "1",
+        "completed": "1",
+        "deliveries": "",
+        "discarded": "0",
+        "overflow": "0",
+        "peakOutstanding": "1",
+        "pending": "0",
+        "phase": "activeWithoutHardware",
+        "rejected": "0"
+      }
+    },
+    {
+      "name": "observationFencing",
+      "values": {
+        "currentPermission": "latched",
+        "currentTapStatus": "latched",
+        "newerPollerRejects": "true",
+        "outputChangeRejects": "true",
+        "ownerReleaseRejects": "true",
+        "sleepRejects": "true",
+        "terminationRejects": "true",
+        "wakeRejects": "true"
+      }
+    }
+  ],
+  "topologies": {
+    "A": [
+      "mainActorBridge",
+      "mainActorWake",
+      "mainActorConsumer"
+    ],
+    "B": [
+      "ownerThread",
+      "ownerRunLoop",
+      "commandSource",
+      "wakeChannel",
+      "mainActorConsumer"
+    ]
+  }
+}

@@ -12,7 +12,7 @@ help:
 		'  make verify  Verify the installed bundle and exact live process' \
 		'  make measure-latency  Install and arm Release latency capture' \
 		'  make latency-report   Validate and summarize the latest capture' \
-		'  make offline-contract Run the non-invasive shared-contract comparison' \
+		'  make offline-contract Run one candidate-bound offline apparatus gate' \
 		'  make clean   Remove only SwiftPM build artifacts'
 
 test:

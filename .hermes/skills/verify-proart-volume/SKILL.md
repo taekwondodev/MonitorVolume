@@ -9,7 +9,7 @@ Verify the installed Release application through the repository-owned build and 
 
 ## Doctor and ordinary verification
 
-Run `make test`, `make check`, and `make offline-contract` before installation. Use `make build` and `make verify` to install and check the real signed bundle and sole live process. Ordinary verification is non-invasive and does not prove hardware control, permission visibility, or OSD visuals.
+Run `make test` and `make check` before installation. Issue #32 candidate worktrees additionally use `make offline-contract` with explicit candidate, immutable source ref, and a fresh evidence directory; it runs one candidate gate and never performs A/B collection. Its comparative procedure is frozen separately in `scripts/issue32_collection_protocol.json`; validate or render it with `scripts/issue32_collection_protocol.py` without running either candidate. Use `make build` and `make verify` to install and check the real signed bundle and sole live process. Ordinary verification is non-invasive and does not prove hardware control, permission visibility, or OSD visuals.
 
 ## Explicit hardware proof
 
