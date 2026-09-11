@@ -21,7 +21,7 @@ On 2026-09-11 the user tried both candidates by hand and captured the app's own 
 4. During the freeze, `AXIsProcessTrustedWithOptions` keeps returning `true` to the app for the whole window (seven consecutive one-second polls in the captured run).
 5. The distributed notification `com.apple.accessibility.api` does not fire for the revocation itself; it fires only when the Accessibility list is edited in other ways.
 6. After roughly seven seconds macOS delivers `tapDisabledByTimeout`. The app removes its run-loop source and invalidates the tap within 0.5 milliseconds and enters suspension. System input recovers at that moment.
-7. Replacing the installed bundle (`make build`) changes the ad-hoc signature and silently invalidates the Accessibility grant: the checkbox stays on, but the process is not trusted until the grant is toggled off and on.
+7. With ad-hoc signing, replacing the installed bundle (`make build`) changed the code identity and silently invalidated the Accessibility grant: the checkbox stayed on, but the process was not trusted until the grant was toggled off and on. Signing with a stable Apple Development identity removes this: the grant survives rebuilds (verified 2026-09-11).
 8. Reopening the app from the Finder while it waits for permission does not reach `applicationShouldHandleReopen` for this accessory app with no windows; the process receives nothing. With the earlier contract (no polling while suspended, recovery only through reopen) the app could never notice a granted permission, and the only recovery was terminating and relaunching.
 9. After a revocation while the tap was active, the same process keeps reading `AXIsProcessTrusted` as `true` but every later `CGEvent.tapCreate` fails. Only a new process can create a tap again.
 
@@ -63,6 +63,6 @@ This is platform behavior for any process holding an event tap on macOS 26, and 
 
 ## Consequences
 
-- After every `make build`, toggle the Accessibility grant off and on before testing (fact 7). Document this next to the build command.
+- The bundle is signed with the Apple Development identity, so the Accessibility grant survives rebuilds (fact 7). The build fails when no identity is installed instead of falling back to ad-hoc.
 - Recovery after a live revocation requires a new process (fact 9): quit and relaunch the app, then grant the permission; the app picks it up on its own.
 - The measurement campaign, offline harness, latency instrumentation, hardware proof probe, and `verify-*` project skill are removed. The command surface is `test`, `check`, `build`, `verify`, `clean`.

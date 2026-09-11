@@ -8,7 +8,7 @@ help:
 		'ProArt Volume commands:' \
 		'  make test    Run the Swift test suite' \
 		'  make check   Run the strict Release build and tooling checks' \
-		'  make build   Build, sign, install, and launch the Release app (then toggle the Accessibility grant off and on)' \
+		'  make build   Build, sign, install, and launch the Release app' \
 		'  make verify  Verify the installed bundle and exact live process' \
 		'  make clean   Remove only SwiftPM build artifacts'
 

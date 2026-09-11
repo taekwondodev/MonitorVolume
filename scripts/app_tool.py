@@ -21,6 +21,8 @@ EXECUTABLE_NAME = "ProArtVolume"
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE_PLIST = ROOT / "Resources" / "Info.plist"
 SOURCE_NOTICES = ROOT / "THIRD_PARTY_NOTICES.md"
+SOURCE_ASSETS = ROOT / "Resources" / "Media.xcassets"
+APP_ICON_NAME = "AppIcon"
 INSTALLED_BUNDLE = Path.home() / "Applications" / f"{APP_NAME}.app"
 INSTALLED_EXECUTABLE = INSTALLED_BUNDLE / "Contents" / "MacOS" / EXECUTABLE_NAME
 
@@ -69,6 +71,7 @@ def source_metadata() -> Dict[str, Any]:
         "CFBundleExecutable": EXECUTABLE_NAME,
         "CFBundleName": APP_NAME,
         "CFBundlePackageType": "APPL",
+        "CFBundleIconFile": APP_ICON_NAME,
         "LSUIElement": True,
     }
     mismatches = {
@@ -125,6 +128,43 @@ def build_release() -> Path:
     return executable
 
 
+def signing_identity() -> str:
+    result = run(["security", "find-identity", "-v", "-p", "codesigning"])
+    identities = [line for line in result.stdout.splitlines() if "Apple Development" in line]
+    if len(identities) > 1:
+        raise RuntimeError("More than one Apple Development identity is installed; keep exactly one")
+    if not identities:
+        raise RuntimeError("No Apple Development signing identity is installed (Xcode > Settings > Accounts > Manage Certificates)")
+    return identities[0].split('"')[1]
+
+
+ICON_POINT_SIZES = (16, 32, 128, 256, 512)
+
+
+def compile_app_icon(destination: Path) -> None:
+    icon_set = SOURCE_ASSETS / f"{APP_ICON_NAME}.appiconset"
+    sources = sorted(path for path in icon_set.glob("*.png") if not path.is_symlink()) if icon_set.is_dir() else []
+    if len(sources) != 1:
+        raise RuntimeError(f"Expected exactly one PNG in {icon_set}, found {len(sources)}")
+    source = sources[0]
+    dimensions = run(["sips", "-g", "pixelWidth", "-g", "pixelHeight", str(source)]).stdout
+    if dimensions.count(": 1024") != 2:
+        raise RuntimeError(f"App icon artwork must be 1024x1024: {source.name}")
+    resources_dir = destination / "Contents" / "Resources"
+    with tempfile.TemporaryDirectory() as scratch:
+        iconset = Path(scratch) / f"{APP_ICON_NAME}.iconset"
+        iconset.mkdir()
+        for points in ICON_POINT_SIZES:
+            for scale in (1, 2):
+                pixels = points * scale
+                suffix = "@2x" if scale == 2 else ""
+                run(["sips", "-z", str(pixels), str(pixels), str(source),
+                     "--out", str(iconset / f"icon_{points}x{points}{suffix}.png")])
+        run(["iconutil", "-c", "icns", str(iconset), "-o", str(resources_dir / f"{APP_ICON_NAME}.icns")])
+    if not (resources_dir / f"{APP_ICON_NAME}.icns").is_file():
+        raise RuntimeError("iconutil did not produce the app icon")
+
+
 def assemble_bundle(
     destination: Path,
     source_executable: Path,
@@ -140,8 +180,9 @@ def assemble_bundle(
     with (destination / "Contents" / "Info.plist").open("wb") as file:
         plistlib.dump(expected_metadata(identity), file, sort_keys=True)
     shutil.copy2(SOURCE_NOTICES, resources_dir / SOURCE_NOTICES.name)
+    compile_app_icon(destination)
     load_metadata(destination / "Contents" / "Info.plist", identity)
-    run(["codesign", "--force", "--sign", "-", str(destination)])
+    run(["codesign", "--force", "--sign", signing_identity(), str(destination)])
     verify_bundle(destination, require_live_process=False, identity=identity)
 
 
@@ -184,7 +225,8 @@ def stop_exact_processes(executable: Path) -> List[int]:
 def stop_installed_app() -> List[int]:
     if not INSTALLED_BUNDLE.exists() and not INSTALLED_BUNDLE.is_symlink():
         return []
-    verify_bundle(INSTALLED_BUNDLE, require_live_process=False, require_notices=False)
+    if INSTALLED_BUNDLE.is_symlink() or not INSTALLED_EXECUTABLE.is_file():
+        raise RuntimeError(f"Installed path is not a {APP_NAME} bundle: {INSTALLED_BUNDLE}")
     return stop_exact_processes(INSTALLED_EXECUTABLE)
 
 
@@ -210,7 +252,12 @@ def verify_bundle(
     if require_notices and not notices_valid:
         raise RuntimeError(f"Third-party notices are missing or invalid: {notices}")
     metadata = load_metadata(plist, identity)
+    icon = contents / "Resources" / f"{APP_ICON_NAME}.icns"
+    if metadata.get("CFBundleIconFile") != APP_ICON_NAME or not icon.is_file():
+        raise RuntimeError(f"App icon is missing from the bundle: {icon}")
     run(["codesign", "--verify", "--deep", "--strict", str(bundle)])
+    signature = run(["codesign", "--display", "--verbose=2", str(bundle)]).stderr
+    authority = next((line.split("=", 1)[1] for line in signature.splitlines() if line.startswith("Authority=")), "adhoc")
     pids = exact_processes(executable)
     if require_live_process and len(pids) != 1:
         raise RuntimeError(f"Expected one exact installed process, found {pids}")
@@ -220,7 +267,7 @@ def verify_bundle(
         "executable": str(executable),
         "ls_ui_element": metadata["LSUIElement"],
         "pids": pids,
-        "signature": "valid",
+        "signature": authority,
         "third_party_notices": str(notices) if notices_valid else None,
     }
 
@@ -234,7 +281,6 @@ def reconcile_backup(backup: Path) -> None:
     if not INSTALLED_BUNDLE.exists() and not INSTALLED_BUNDLE.is_symlink():
         backup.rename(INSTALLED_BUNDLE)
         return
-    verify_bundle(INSTALLED_BUNDLE, require_live_process=False, require_notices=False)
     shutil.rmtree(backup)
 
 
@@ -260,8 +306,6 @@ def launch_and_verify(
 def rollback_install(backup: Path, replaced: bool, was_running: bool) -> None:
     if replaced and (not backup.exists() or backup.is_symlink()):
         raise RuntimeError("Previous application backup is unavailable for rollback")
-    if replaced:
-        verify_bundle(backup, require_live_process=False, require_notices=False)
     if INSTALLED_BUNDLE.exists() or INSTALLED_BUNDLE.is_symlink():
         stop_exact_processes(INSTALLED_EXECUTABLE)
         shutil.rmtree(INSTALLED_BUNDLE)
@@ -281,7 +325,8 @@ def replace_and_launch(staged_bundle: Path, launch_arguments: Optional[List[str]
     if INSTALLED_BUNDLE.is_symlink():
         raise RuntimeError(f"Installed bundle must not be a symlink: {INSTALLED_BUNDLE}")
     if INSTALLED_BUNDLE.exists():
-        verify_bundle(INSTALLED_BUNDLE, require_live_process=False, require_notices=False)
+        if not INSTALLED_BUNDLE.is_dir() or not (INSTALLED_BUNDLE / "Contents" / "MacOS" / EXECUTABLE_NAME).is_file():
+            raise RuntimeError(f"Installed path is not a {APP_NAME} bundle: {INSTALLED_BUNDLE}")
     stopped = stop_installed_app()
     replaced = INSTALLED_BUNDLE.exists()
     try:
