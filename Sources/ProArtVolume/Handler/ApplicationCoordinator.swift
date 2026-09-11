@@ -1,5 +1,6 @@
 import AppKit
 import ProArtVolumeCore
+import ServiceManagement
 
 @MainActor
 final class ApplicationCoordinator: NSObject, NSApplicationDelegate, MediaKeyInterceptorDelegate {
@@ -48,6 +49,17 @@ final class ApplicationCoordinator: NSObject, NSApplicationDelegate, MediaKeyInt
         workspace.addObserver(self, selector: #selector(willSleep), name: NSWorkspace.willSleepNotification, object: nil)
         workspace.addObserver(self, selector: #selector(didWake), name: NSWorkspace.didWakeNotification, object: nil)
         reopen()
+        registerAtLoginOnFirstLaunch()
+    }
+
+    private func registerAtLoginOnFirstLaunch() {
+        let defaults = UserDefaults.standard
+        let key = "launchAtLoginRegistrationAttempted"
+        guard !defaults.bool(forKey: key) else { return }
+        defaults.set(true, forKey: key)
+        // Flush before registration so a failed system call cannot be retried on the next launch.
+        _ = defaults.synchronize()
+        try? SMAppService.mainApp.register()
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
