@@ -6,7 +6,7 @@ Implement the revised two-identity specification in GitHub issue #33 and resume 
 
 ## Current state
 
-The offline runner implementation and v5 two-identity setup are complete. Campaign v5 is an immutable, inconclusive runtime fixed point. Campaign v6 is a superseded preparation of the old 2,048-record contract with zero measured runs and no valid setup receipt. Candidate A and B now use a 65,536-record lifecycle budget at new clean local refs. Campaign v7 is not prepared; preparation, setup, launch, and collection are not authorized.
+The offline runner implementation and v5 two-identity setup are complete. Campaign v5 is an immutable, inconclusive runtime fixed point. Campaign v6 is a superseded preparation of the old 2,048-record contract with zero measured runs and no valid setup receipt. Candidate A and B now use a 65,536-record lifecycle budget at new clean local refs. Campaign v7 is prepared offline with zero runs and no setup receipt; setup, launch, and collection are not authorized.
 
 - Primary repository: `/Users/taekwondodev/Developer/ProArtVolume`
 - Primary branch: `verification/issue-33`
@@ -14,9 +14,10 @@ The offline runner implementation and v5 two-identity setup are complete. Campai
 - Candidate B worktree: `/private/tmp/ProArtVolume-issue-32-b`
 - Candidate A pinned ref: `a3c45b757261488b7857374a3fa1ac88d18994ba`
 - Candidate B pinned ref: `ea5a3231e52c8fd908819e0caec3735b6711de2b`
+- Current prepared campaign: `.hermes/verification/evidence/issue-33-live-campaign-v7`
 - Superseded prepared campaign: `.hermes/verification/evidence/issue-33-live-campaign-v6`
 - Campaign v6 has schema 2, two signed old-budget candidate bundles, zero measured runs, and no valid setup receipt.
-- Campaign v7 does not exist yet.
+- Campaign v7 has schema 2, signed Candidate A/B bundles, 16 unchanged normal runs, four separately authorized acceptance runs, zero collected runs, and no setup receipt.
 - Campaign v5 remains at `.hermes/verification/evidence/issue-33-live-campaign-v5` as historical failed evidence.
 - Campaign v5 has schema 2, a passed setup receipt, and two preserved failed normal runs.
 - Normal ordinal 1, Candidate A/full, failed because the fixed 2,048-record lifecycle budget exhausted after chat-mediated delays, leaving `permissionPoll` unfinished.
@@ -82,6 +83,8 @@ Malformed readiness arguments fail closed without aborting ordinary app startup.
 - Candidate A commit `a3c45b7` and Candidate B commit `ea5a323` change only the shared lifecycle budget and the matching literals in the existing Domain test.
 - The v7 protocol changes only the two candidate source-ref bindings; `make issue33-protocol`, primary `make test`, and primary `make check` pass.
 - The revised GitHub issue body is byte-identical to `.hermes/tmp/issue-33-v7-spec.md` and remains open with `bug` plus `ready-for-agent`.
+- Campaign v7 offline preparation passed. Its protocol SHA-256 is `877fe9b637031e6918d8a8bf50582c1a9ae2ba8433178ae95d7d4d921244bed2`; runner SHA-256 is `a788d9c47b2427e562e251a53407bb6cbfad3f1e8abcebeb9673b3db66bfea98`; both retained bundle signatures validate; both source worktrees remain clean.
+- Post-preparation checks show zero Candidate A, Candidate B, and production processes.
 - `git diff --check`: passed.
 
 ## Independent review
@@ -102,8 +105,8 @@ The 65,536-record delta received a fresh independent DeepSeek V4.1 Flash review 
 
 ## Runtime boundary
 
-Do not prepare campaign v7, perform setup, or collect a run without new explicit user authorization for that boundary.
+Do not perform campaign v7 setup or collect a run without new explicit user authorization for that boundary.
 
-The next state-changing operation is offline preparation for campaign v7. It builds both new refs, creates and signs two retained bundles in a new evidence directory, and records new source/artifact closures. It does not install or launch. Setup requires a later explicit consent to install the changed retained identities, launch them sequentially through LaunchServices, require manual Accessibility acknowledgement, and create a new receipt plus fresh readiness for both identities. Normal runs require another explicit consent for physical media-key input, resulting DDC writes, and normal UI activity. Lifecycle/sleep-wake and stress each require separate explicit authorization. No prior consent carries forward.
+The next state-changing operation is setup for campaign v7. It requires explicit consent to install the changed retained identities, launch them sequentially through LaunchServices, require manual Accessibility acknowledgement, and create a new receipt plus fresh readiness for both identities. Normal runs require another explicit consent for physical media-key input, resulting DDC writes, and normal UI activity. Lifecycle/sleep-wake and stress each require separate explicit authorization. No prior consent carries forward.
 
 Do not run `make build`; it targets the production application identity and is not part of campaign setup.
