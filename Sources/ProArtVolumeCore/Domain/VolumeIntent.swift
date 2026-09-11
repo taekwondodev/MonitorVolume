@@ -25,13 +25,11 @@ package struct DesiredMonitorState: Sendable {
     package let session: ControlSession
     package let revision: UInt64
     package let intent: VolumeIntent
-    package let measurementID: ControlMeasurementID?
 
-    package init(session: ControlSession, revision: UInt64, intent: VolumeIntent, measurementID: ControlMeasurementID?) {
+    package init(session: ControlSession, revision: UInt64, intent: VolumeIntent) {
         self.session = session
         self.revision = revision
         self.intent = intent
-        self.measurementID = measurementID
     }
 }
 
@@ -46,16 +44,12 @@ package struct VolumeIntentReducer {
         self.session == session ? intent ?? VolumeIntent(session.seed) : VolumeIntent(session.seed)
     }
 
-    package mutating func accept(
-        _ command: MediaKeyCommand,
-        session: ControlSession,
-        measurementID: ControlMeasurementID? = nil
-    ) -> DesiredMonitorState {
+    package mutating func accept(_ command: MediaKeyCommand, session: ControlSession) -> DesiredMonitorState {
         let starting = startingIntent(for: session)
         self.session = session
         let next = starting.applying(command)
         intent = next
         revision += 1
-        return DesiredMonitorState(session: session, revision: revision, intent: next, measurementID: measurementID)
+        return DesiredMonitorState(session: session, revision: revision, intent: next)
     }
 }

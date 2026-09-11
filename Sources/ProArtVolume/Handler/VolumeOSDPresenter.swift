@@ -13,11 +13,6 @@ final class VolumeOSDPresenter {
     private var dismissTask: Task<Void, Never>?
     private var pulseTask: Task<Void, Never>?
     private var presentationRevision: UInt64 = 0
-    private let latencyRecorder: LatencyRecorder?
-
-    init(latencyRecorder: LatencyRecorder? = nil) {
-        self.latencyRecorder = latencyRecorder
-    }
 
     isolated deinit {
         dismissTask?.cancel()
@@ -25,11 +20,7 @@ final class VolumeOSDPresenter {
         panel?.close()
     }
 
-    func show(
-        _ state: VolumeIntent,
-        boundary: Bool,
-        interactionIDs: [ControlMeasurementID] = []
-    ) {
+    func show(_ state: VolumeIntent, boundary: Bool) {
         dismissTask?.cancel()
         pulseTask?.cancel()
         presentationRevision += 1
@@ -37,19 +28,9 @@ final class VolumeOSDPresenter {
         let entering = panel == nil
 
         let panel = panel ?? makePanel()
-        latencyRecorder?.record(
-            stage: .osdPresentationRequested,
-            interactionIDs: interactionIDs
-        )
         let root = VolumeOSDView(state: state, entered: !entering, pulse: boundary)
-        if let hosting = panel.contentView as? MeasuredVolumeHostingView {
-            hosting.present(root, interactionIDs: interactionIDs)
-        } else if let hosting = panel.contentView as? NSHostingView<VolumeOSDView> {
+        if let hosting = panel.contentView as? NSHostingView<VolumeOSDView> {
             hosting.rootView = root
-        } else if let latencyRecorder {
-            let hosting = MeasuredVolumeHostingView(rootView: root, recorder: latencyRecorder)
-            hosting.present(root, interactionIDs: interactionIDs)
-            panel.contentView = hosting
         } else {
             panel.contentView = NSHostingView(rootView: root)
         }
@@ -127,40 +108,3 @@ final class VolumeOSDPresenter {
     }
 }
 
-@MainActor
-private final class MeasuredVolumeHostingView: NSHostingView<VolumeOSDView> {
-    private let recorder: LatencyRecorder?
-    private var pendingIDs: [ControlMeasurementID] = []
-
-    required init(rootView: VolumeOSDView) {
-        recorder = nil
-        super.init(rootView: rootView)
-    }
-
-    init(rootView: VolumeOSDView, recorder: LatencyRecorder) {
-        self.recorder = recorder
-        super.init(rootView: rootView)
-    }
-
-    func present(_ view: VolumeOSDView, interactionIDs: [ControlMeasurementID]) {
-        if !pendingIDs.isEmpty {
-            recorder?.record(stage: .osdPresentationSuperseded, interactionIDs: pendingIDs)
-        }
-        pendingIDs = interactionIDs
-        rootView = view
-        needsDisplay = true
-    }
-
-    required init?(coder: NSCoder) {
-        nil
-    }
-
-    override func draw(_ dirtyRect: NSRect) {
-        super.draw(dirtyRect)
-        guard !pendingIDs.isEmpty else {
-            return
-        }
-        recorder?.record(stage: .osdFirstDrawCompleted, interactionIDs: pendingIDs)
-        pendingIDs.removeAll(keepingCapacity: true)
-    }
-}

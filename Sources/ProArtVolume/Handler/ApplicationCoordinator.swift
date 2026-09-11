@@ -8,7 +8,6 @@ final class ApplicationCoordinator: NSObject, NSApplicationDelegate, MediaKeyInt
     private let output: CoreAudioOutputRepository
     private let interceptor: MediaKeyInterceptor
     private let osd: VolumeOSDPresenter
-    private let recorder: LatencyRecorder?
     private let diagnostics: InputLifecycleDiagnostics?
     private var reducer = VolumeIntentReducer()
     private var permissionTask: Task<Void, Never>?
@@ -19,14 +18,13 @@ final class ApplicationCoordinator: NSObject, NSApplicationDelegate, MediaKeyInt
     private var reopenAfterTapRelease = false
 
     init(service: IntentControlService, output: CoreAudioOutputRepository,
-         eligibility: ControlEligibility, recorder: LatencyRecorder?, diagnostics: InputLifecycleDiagnostics?) {
+         eligibility: ControlEligibility, diagnostics: InputLifecycleDiagnostics?) {
         self.service = service
         self.output = output
         self.eligibility = eligibility
-        self.recorder = recorder
         self.diagnostics = diagnostics
         interceptor = MediaKeyInterceptor(eligibility: eligibility, diagnostics: diagnostics)
-        osd = VolumeOSDPresenter(latencyRecorder: recorder)
+        osd = VolumeOSDPresenter()
         super.init()
         interceptor.delegate = self
     }
@@ -231,12 +229,8 @@ final class ApplicationCoordinator: NSObject, NSApplicationDelegate, MediaKeyInt
         let command = delivery.command
         let session = delivery.session
         let prior = reducer.startingIntent(for: session)
-        let id = recorder?.beginInteraction(command: command, startingMuted: prior.mute == .muted)
-        let request = reducer.accept(command, session: session, measurementID: id)
-        let ids = id.map { [$0] } ?? []
-        recorder?.record(stage: .intentReduced, interactionIDs: ids)
-        osd.show(request.intent, boundary: request.intent == prior, interactionIDs: ids)
-        recorder?.record(stage: .commandEnqueueRequested, interactionIDs: ids)
+        let request = reducer.accept(command, session: session)
+        osd.show(request.intent, boundary: request.intent == prior)
         let service = service
         Task { await service.submit(request) }
     }

@@ -3,7 +3,6 @@ package actor IntentControlService {
     private let activeOutput: any ActiveAudioOutputReading
     private let eligibility: ControlEligibility
     private let sleeper: ControlSleeper
-    private let observer: ControlMeasurementObserver?
 
     private var generation: UInt64 = 0
     private var permitted = false
@@ -21,14 +20,12 @@ package actor IntentControlService {
         monitor: any MonitorControlling,
         activeOutput: any ActiveAudioOutputReading,
         eligibility: ControlEligibility,
-        sleeper: ControlSleeper = .continuous,
-        observer: ControlMeasurementObserver? = nil
+        sleeper: ControlSleeper = .continuous
     ) {
         self.monitor = monitor
         self.activeOutput = activeOutput
         self.eligibility = eligibility
         self.sleeper = sleeper
-        self.observer = observer
     }
 
     deinit {
@@ -57,13 +54,10 @@ package actor IntentControlService {
         guard isCurrent(request.session.generation),
               eligibility.contains(request.session),
               request.revision > latestRevision else {
-            record(.commandDiscarded, request)
             return
         }
         latestRevision = request.revision
-        if let desired { record(.commandSuperseded, desired) }
         desired = request
-        record(.commandEnqueued, request)
         startWorker()
     }
 
@@ -97,12 +91,7 @@ package actor IntentControlService {
                 await readTrustedState(generation: generation)
             } else if let request = desired {
                 desired = nil
-                let context = request.measurementID.map { ControlMeasurementContext(interactionIDs: [$0]) }
-                record(.commandStarted, request)
-                let success = await ControlMeasurementTaskContext.$current.withValue(context) {
-                    await reconcile(request)
-                }
-                record(success, request)
+                await reconcile(request)
             }
         }
         worker = nil
@@ -128,33 +117,38 @@ package actor IntentControlService {
         }
     }
 
-    private func reconcile(_ request: DesiredMonitorState) async -> ControlMeasurementStage {
+    private enum ReconcileOutcome {
+        case completed, superseded, discarded
+    }
+
+    @discardableResult
+    private func reconcile(_ request: DesiredMonitorState) async -> ReconcileOutcome {
         guard isCurrent(request.session.generation), eligibility.contains(request.session),
-              var state = confirmed else { return .commandDiscarded }
+              var state = confirmed else { return .discarded }
         do {
-            guard try await mayWrite(request.session) else { return .commandDiscarded }
-            if desired != nil { return .commandSuperseded }
+            guard try await mayWrite(request.session) else { return .discarded }
+            if desired != nil { return .superseded }
             if request.intent.volume != state.volume {
                 let volume = try await monitor.writeVolume(request.intent.volume)
-                guard isCurrent(request.session.generation) else { return .commandDiscarded }
+                guard isCurrent(request.session.generation) else { return .discarded }
                 guard volume == request.intent.volume else { throw MonitorRepositoryError.readBackMismatch }
                 state = ConfirmedMonitorState(volume: volume, mute: state.mute)
                 confirmed = state
             }
-            if desired != nil { return .commandSuperseded }
+            if desired != nil { return .superseded }
             if request.intent.mute != state.mute {
-                guard try await mayWrite(request.session) else { return .commandDiscarded }
-                if desired != nil { return .commandSuperseded }
+                guard try await mayWrite(request.session) else { return .discarded }
+                if desired != nil { return .superseded }
                 let mute = try await monitor.writeMute(request.intent.mute)
-                guard isCurrent(request.session.generation) else { return .commandDiscarded }
+                guard isCurrent(request.session.generation) else { return .discarded }
                 guard mute == request.intent.mute else { throw MonitorRepositoryError.readBackMismatch }
                 state = ConfirmedMonitorState(volume: state.volume, mute: mute)
                 confirmed = state
             }
-            return isCurrent(request.session.generation) ? .commandCompleted : .commandDiscarded
+            return isCurrent(request.session.generation) ? .completed : .discarded
         } catch {
             fail(generation: request.session.generation)
-            return .commandDiscarded
+            return .discarded
         }
     }
 
@@ -179,7 +173,6 @@ package actor IntentControlService {
     }
 
     private func discardDesired() {
-        if let desired { record(.commandDiscarded, desired) }
         desired = nil
     }
 
@@ -207,10 +200,5 @@ package actor IntentControlService {
         guard eligibility.beginValidation(generation: generation) else { return }
         needsRead = true
         startWorker()
-    }
-
-    private func record(_ stage: ControlMeasurementStage, _ request: DesiredMonitorState) {
-        guard let id = request.measurementID else { return }
-        observer?.record(stage, context: ControlMeasurementContext(interactionIDs: [id]))
     }
 }

@@ -16,7 +16,6 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from latency_report import build_latency_report, read_latency_evidence
 from hardware_proof import validate_hardware_proof
 
 
@@ -390,30 +389,11 @@ def check_source() -> Dict[str, Any]:
         run(["bash", "-n", str(script)])
     python_files = [
         ROOT / "scripts" / "app_tool.py",
-        ROOT / "scripts" / "latency_report.py",
         ROOT / "scripts" / "hardware_proof.py",
-        ROOT / "scripts" / "issue32_apparatus.py",
-        ROOT / "scripts" / "issue32_collector.py",
-        ROOT / "scripts" / "issue32_collection_protocol.py",
-        ROOT / "scripts" / "issue33_live.py",
-        ROOT / "scripts" / "issue33_live_protocol.py",
-        ROOT / "scripts" / "offline_policy_probe.py",
-        ROOT / "scripts" / "issue32_conformance.py",
         ROOT / "Tests" / "Tooling" / "command_surface_test.py",
-        ROOT / "Tests" / "Tooling" / "latency_report_test.py",
-        ROOT / "Tests" / "Tooling" / "issue32_apparatus_test.py",
-        ROOT / "Tests" / "Tooling" / "issue32_collector_test.py",
-        ROOT / "Tests" / "Tooling" / "issue32_collection_protocol_test.py",
-        ROOT / "Tests" / "Tooling" / "issue33_live_test.py",
-        ROOT / "Tests" / "Tooling" / "issue33_live_protocol_test.py",
-        ROOT / ".hermes" / "skills" / "verify-proart-volume" / "scripts" / "verify.py",
     ]
     for path in python_files:
         ast.parse(path.read_text(), filename=str(path))
-    json.loads((ROOT / "scripts" / "issue32_expected_scenarios.json").read_text())
-    json.loads((ROOT / "scripts" / "issue32_collection_protocol.json").read_text())
-    json.loads((ROOT / "scripts" / "issue33_live_protocol.json").read_text())
-    run(["swiftc", "-parse", str(ROOT / "scripts" / "Issue32EnvironmentProbe.swift")])
     run(["git", "diff", "--check"], cwd=ROOT)
     load_metadata(SOURCE_PLIST)
     run(
@@ -483,69 +463,6 @@ def current_revision() -> str:
     return revision
 
 
-def arm_latency_measurement() -> Dict[str, Any]:
-    revision = current_revision()
-    evidence_directory = ROOT / ".hermes" / "verification" / "evidence" / f"latency-{time.time_ns()}"
-    evidence_directory.mkdir(parents=True)
-    evidence_path = evidence_directory / "trace.json"
-    try:
-        installed = install_and_launch(
-            [
-                "--latency-evidence",
-                str(evidence_path),
-                "--latency-revision",
-                revision,
-            ]
-        )
-        deadline = time.monotonic() + 5
-        evidence = None
-        while time.monotonic() < deadline:
-            if evidence_path.is_file():
-                try:
-                    evidence = read_latency_evidence(evidence_path, INSTALLED_EXECUTABLE)
-                    break
-                except RuntimeError:
-                    pass
-            time.sleep(0.1)
-        if evidence is None:
-            raise RuntimeError("The installed app did not arm latency evidence")
-        if evidence["metadata"].get("revision") != revision:
-            raise RuntimeError("Latency evidence revision does not match the installed build")
-        expected_hash = hashlib.sha256(INSTALLED_EXECUTABLE.read_bytes()).hexdigest()
-        if evidence["metadata"].get("executableSHA256") != expected_hash:
-            raise RuntimeError("Latency evidence executable hash does not match the installed build")
-    except Exception:
-        stop_installed_app()
-        raise
-    return {
-        **installed,
-        "status": "armed",
-        "evidence": str(evidence_path),
-        "revision": revision,
-        "instructions": [
-            "Wait two seconds for the initial monitor refresh.",
-            "If the monitor is muted, press mute once and wait two seconds.",
-            "Press volume up once and wait two seconds.",
-            "Press mute once and wait two seconds.",
-            "Press volume down once while muted and wait two seconds.",
-            "Press volume up, down, up, down rapidly, then wait two seconds.",
-            "Run make latency-report.",
-        ],
-    }
-
-
-def latest_latency_evidence() -> Path:
-    evidence_root = ROOT / ".hermes" / "verification" / "evidence"
-    candidates = sorted(evidence_root.glob("latency-*/trace.json"))
-    if not candidates:
-        raise RuntimeError("No latency evidence exists. Run make measure-latency first")
-    return candidates[-1]
-
-
-def latency_report() -> Dict[str, Any]:
-    return build_latency_report(latest_latency_evidence(), INSTALLED_EXECUTABLE)
-
-
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -553,8 +470,6 @@ def main() -> int:
         choices=(
             "build",
             "check",
-            "latency-report",
-            "measure-latency",
             "probe-monitor-status",
             "stop",
             "verify",
@@ -566,10 +481,6 @@ def main() -> int:
             result = install_and_launch()
         elif arguments.command == "check":
             result = check_source()
-        elif arguments.command == "latency-report":
-            result = latency_report()
-        elif arguments.command == "measure-latency":
-            result = arm_latency_measurement()
         elif arguments.command == "probe-monitor-status":
             result = probe_monitor_status()
         elif arguments.command == "stop":
