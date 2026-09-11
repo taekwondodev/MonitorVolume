@@ -158,6 +158,17 @@ package final class ControlEligibility: Sendable {
         state.withLock { $0.phase.isLifecycleActive }
     }
 
+    package var awaitsPermission: Bool {
+        state.withLock { state in
+            switch state.phase {
+            case .suspended(.missingPermission), .suspended(.permissionRevoked):
+                true
+            default:
+                false
+            }
+        }
+    }
+
     package var pendingDeliveryCount: Int {
         state.withLock { $0.queued.count + $0.inFlight.count }
     }

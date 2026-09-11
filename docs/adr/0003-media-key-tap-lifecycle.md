@@ -22,7 +22,8 @@ On 2026-09-11 the user tried both candidates by hand and captured the app's own 
 5. The distributed notification `com.apple.accessibility.api` does not fire for the revocation itself; it fires only when the Accessibility list is edited in other ways.
 6. After roughly seven seconds macOS delivers `tapDisabledByTimeout`. The app removes its run-loop source and invalidates the tap within 0.5 milliseconds and enters suspension. System input recovers at that moment.
 7. Replacing the installed bundle (`make build`) changes the ad-hoc signature and silently invalidates the Accessibility grant: the checkbox stays on, but the process is not trusted until the grant is toggled off and on.
-8. Reopening a suspended app from the Finder did not produce a `reopen` lifecycle record in one captured run; the only recovery observed was terminating and relaunching the process.
+8. Reopening the app from the Finder while it waits for permission does not reach `applicationShouldHandleReopen` for this accessory app with no windows; the process receives nothing. With the earlier contract (no polling while suspended, recovery only through reopen) the app could never notice a granted permission, and the only recovery was terminating and relaunching.
+9. After a revocation while the tap was active, the same process keeps reading `AXIsProcessTrusted` as `true` but every later `CGEvent.tapCreate` fails. Only a new process can create a tap again.
 
 ## Decisions
 
@@ -35,6 +36,8 @@ The tap stays on the main run loop. At observed parity the simpler design wins, 
 Every failure the app can detect leads to the same state: release the tap, discard pending work, stay alive and inert until the user reopens the app. On reopen the app validates permission, recreates the tap, and reseeds volume and mute from the monitor's real state. Nothing is replayed.
 
 This applies uniformly to missing permission at launch, detected revocation, tap disabled by timeout or by user input, and tap creation failure. There is no automatic retry after the system disables the tap: if macOS removed it, the app does not fight for it.
+
+One exception, forced by fact 8: while the app waits for permission (`missingPermission` or `permissionRevoked`), it checks `AXIsProcessTrusted` once per second and reopens by itself as soon as the grant is present. Granting the permission in System Settings is therefore enough; no reopen or relaunch is needed. System suspensions (tap disabled, creation failed) do not watch for anything.
 
 ### Handoff without capacity
 
@@ -61,5 +64,5 @@ This is platform behavior for any process holding an event tap on macOS 26, and 
 ## Consequences
 
 - After every `make build`, toggle the Accessibility grant off and on before testing (fact 7). Document this next to the build command.
-- Reopening a suspended app from the Finder must restart validation (fact 8). This is a small defect tracked in its own issue.
+- Recovery after a live revocation requires a new process (fact 9): quit and relaunch the app, then grant the permission; the app picks it up on its own.
 - The measurement campaign, offline harness, latency instrumentation, hardware proof probe, and `verify-*` project skill are removed. The command surface is `test`, `check`, `build`, `verify`, `clean`.

@@ -15,7 +15,7 @@ enum InputLifecycleConfiguration: Equatable {
 enum InputLifecycleReason: String, Sendable {
     case launch, reopen, permissionPoll, outputChanged, displayChanged
     case sleep, wake, termination, deinitialization, tapUnavailable
-    case missingAccessibility, permissionRevoked, disabledTap, deliveryOverflow, creationFailure
+    case missingAccessibility, permissionRevoked, permissionGranted, disabledTap, deliveryOverflow, creationFailure
 }
 
 enum InputLifecycleOperation: String, Sendable {

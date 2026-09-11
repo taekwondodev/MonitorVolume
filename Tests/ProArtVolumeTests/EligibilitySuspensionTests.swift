@@ -54,6 +54,35 @@ struct EligibilitySuspensionTests {
         #expect(gate.phase == .suspended(.permissionRevoked))
     }
 
+    @Test(arguments: [InputSuspensionReason.missingPermission, .permissionRevoked])
+    func waitingForPermissionKeepsWatchingAndReopensOnceGranted(_ reason: InputSuspensionReason) throws {
+        let gate = try makeEligibleGate()
+        gate.releaseTap()
+        _ = gate.suspend(reason)
+
+        #expect(gate.awaitsPermission)
+        #expect(!gate.allowsPermissionPolling)
+        guard case .started = gate.reopen() else {
+            Issue.record("granting permission must allow the suspended gate to reopen")
+            return
+        }
+        #expect(gate.phase == .validating)
+        #expect(!gate.awaitsPermission)
+    }
+
+    @Test(arguments: [
+        InputSuspensionReason.tapDisabledByTimeout,
+        .tapDisabledByUserInput,
+        .tapCreationFailed,
+        .deliveryOverflow,
+    ])
+    func systemSuspensionsDoNotWaitForPermission(_ reason: InputSuspensionReason) throws {
+        let gate = try makeEligibleGate()
+        _ = gate.suspend(reason)
+
+        #expect(!gate.awaitsPermission)
+    }
+
     @Test
     func passThroughAfterOverflowDiscardsHeldDeliveryAndPassesTheRejectedKey() throws {
         let gate = try makeEligibleGate(capacity: 2)
