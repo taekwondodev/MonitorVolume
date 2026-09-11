@@ -13,6 +13,4 @@ struct VolumeLevelTests {
         #expect(VolumeLevel(-1) == nil)
         #expect(VolumeLevel(101) == nil)
     }
-
-
 }

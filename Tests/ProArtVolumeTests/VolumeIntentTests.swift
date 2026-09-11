@@ -4,8 +4,7 @@ import Testing
 struct VolumeIntentTests {
     @Test(arguments: [(98, [100, 95]), (2, [0, 5])])
     func saturatesEachPressBeforeCoalescing(start: Int, expected: [Int]) throws {
-        let seed = ConfirmedMonitorState(volume: try #require(VolumeLevel(start)), mute: .unmuted)
-        let session = ControlSession(generation: 1, seedRevision: 1, seed: seed)
+        let session = try ControlSession.fixture(generation: 1, seedRevision: 1, volume: start, mute: .unmuted)
         var reducer = VolumeIntentReducer()
         let commands: [MediaKeyCommand] = start == 98
             ? [.step(.increase), .step(.decrease)] : [.step(.decrease), .step(.increase)]
@@ -14,8 +13,7 @@ struct VolumeIntentTests {
     }
 
     @Test func rapidPressesRetainIndividualIntents() throws {
-        let session = ControlSession(generation: 1, seedRevision: 1,
-                                     seed: .init(volume: try #require(VolumeLevel(50)), mute: .unmuted))
+        let session = try ControlSession.fixture(generation: 1, seedRevision: 1, volume: 50, mute: .unmuted)
         var reducer = VolumeIntentReducer()
         let values = (0..<3).map { _ in reducer.accept(.step(.increase), session: session).intent.volume.rawValue }
         #expect(values == [55, 60, 65])
@@ -38,11 +36,9 @@ struct VolumeIntentTests {
 
     @Test func recoveryReseedsInsteadOfReplayingDisplayedIntent() throws {
         var reducer = VolumeIntentReducer()
-        let first = ControlSession(generation: 1, seedRevision: 1,
-                                   seed: .init(volume: try #require(VolumeLevel(50)), mute: .unmuted))
+        let first = try ControlSession.fixture(generation: 1, seedRevision: 1, volume: 50, mute: .unmuted)
         _ = reducer.accept(.step(.increase), session: first)
-        let recovered = ControlSession(generation: 1, seedRevision: 2,
-                                       seed: .init(volume: try #require(VolumeLevel(80)), mute: .muted))
+        let recovered = try ControlSession.fixture(generation: 1, seedRevision: 2, volume: 80, mute: .muted)
         let next = reducer.accept(.step(.increase), session: recovered)
         #expect(next.intent.volume.rawValue == 85)
         #expect(next.intent.mute == .unmuted)

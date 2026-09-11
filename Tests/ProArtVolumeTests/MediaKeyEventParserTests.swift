@@ -13,7 +13,7 @@ struct MediaKeyEventParserTests {
 
         #expect(
             MediaKeyEventParser.parse(systemDefinedSubtype: 8, data1: data1)
-                == MediaKeyEvent(key: expectedKey, phase: .down)
+                == keyDown(expectedKey)
         )
     }
 
@@ -23,7 +23,7 @@ struct MediaKeyEventParserTests {
 
         #expect(
             MediaKeyEventParser.parse(systemDefinedSubtype: 8, data1: data1)
-                == MediaKeyEvent(key: .volumeDown, phase: .up)
+                == keyUp(.volumeDown)
         )
     }
 

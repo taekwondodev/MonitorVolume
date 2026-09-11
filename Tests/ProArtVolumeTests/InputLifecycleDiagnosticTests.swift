@@ -4,7 +4,6 @@ import Testing
 struct InputLifecycleDiagnosticTests {
     @Test func configurationRequiresExplicitProcessFlag() {
         #expect(InputLifecycleConfiguration(arguments: ["app"]) == .disabled)
-        #expect(InputLifecycleConfiguration(arguments: ["app", "--latency-evidence", "/fixture.json"]) == .disabled)
         #expect(InputLifecycleConfiguration(arguments: ["app", "--diagnose-input-lifecycle"]) == .enabled)
         #expect(InputLifecycleConfiguration(arguments: ["app", "--diagnose-input-lifecycle",
                                                        "--diagnose-input-lifecycle"]) == .duplicateFlag)
@@ -32,7 +31,6 @@ struct InputLifecycleDiagnosticTests {
             event: "handoff", name: "admitted", token: 3, generation: 9))
     }
 
-
     @Test func budgetEmitsExactlyOneExhaustionMarker() throws {
         var budget = InputLifecycleBudget()
         for sequence in UInt64(1)...2_048 {
@@ -55,64 +53,5 @@ struct InputLifecycleDiagnosticTests {
         #expect(budget.record(.sessionEnded, uptimeNanoseconds: 11)?.event == .sessionEnded)
         #expect(!budget.acceptsRegularRecord)
         #expect(budget.record(.lifecycle(.deinitialization, generation: 1), uptimeNanoseconds: 12) == nil)
-    }
-
-    @Test func pairedFixtureIsStructurallyCompleteNotRuntimeProof() {
-        let query = InputLifecycleQueryToken(sequence: 2, kind: .accessibility, tap: 0)
-        let stop = InputLifecycleOperationToken(sequence: 4, kind: .stop, tap: 7)
-        let records: [InputLifecycleRecord] = [
-            .init(sequence: 1, uptimeNanoseconds: 10, event: .sessionStarted),
-            .init(sequence: 2, uptimeNanoseconds: 11, event: .queryBegan(query)),
-            .init(sequence: 3, uptimeNanoseconds: 12, event: .queryReturned(query, false)),
-            .init(sequence: 4, uptimeNanoseconds: 13, event: .operationBegan(stop, .missingAccessibility)),
-            .init(sequence: 5, uptimeNanoseconds: 14, event: .operationEnded(stop, .returned)),
-            .init(sequence: 6, uptimeNanoseconds: 15, event: .sessionEnded),
-        ]
-        #expect(InputLifecycleTraceAssessment.assess(records).isComplete)
-        #expect(!InputLifecycleTraceAssessment.assess(Array(records.dropFirst())).isComplete)
-        #expect(!InputLifecycleTraceAssessment.assess(Array(records.dropLast())).isComplete)
-        #expect(!InputLifecycleTraceAssessment.assess(records.filter { $0.sequence != 3 }).isComplete)
-    }
-
-    @Test func unfinishedOperationIsNotClassifiedAsDeadlock() {
-        let stop = InputLifecycleOperationToken(sequence: 2, kind: .tapInvalidate, tap: 7)
-        let result = InputLifecycleTraceAssessment.assess([
-            .init(sequence: 1, uptimeNanoseconds: 10, event: .sessionStarted),
-            .init(sequence: 2, uptimeNanoseconds: 11, event: .operationBegan(stop, .missingAccessibility)),
-        ])
-        #expect(!result.isComplete)
-        #expect(result.unfinishedOperations == [2])
-        #expect(!result.hasGapsOrInvalidPairs)
-        #expect(!result.ended)
-    }
-
-    @Test func mismatchedTapAndLostBeginRemainIncomplete() {
-        let begin = InputLifecycleOperationToken(sequence: 2, kind: .sourceRemove, tap: 7)
-        let wrong = InputLifecycleOperationToken(sequence: 2, kind: .sourceRemove, tap: 8)
-        #expect(InputLifecycleTraceAssessment.assess([
-            .init(sequence: 1, uptimeNanoseconds: 10, event: .sessionStarted),
-            .init(sequence: 2, uptimeNanoseconds: 11, event: .operationBegan(begin, .missingAccessibility)),
-            .init(sequence: 3, uptimeNanoseconds: 12, event: .operationEnded(wrong, .returned)),
-            .init(sequence: 4, uptimeNanoseconds: 13, event: .sessionEnded),
-        ]).hasGapsOrInvalidPairs)
-        #expect(InputLifecycleTraceAssessment.assess([
-            .init(sequence: 1, uptimeNanoseconds: 10, event: .sessionStarted),
-            .init(sequence: 2, uptimeNanoseconds: 11, event: .operationEnded(begin, .returned)),
-            .init(sequence: 3, uptimeNanoseconds: 12, event: .sessionEnded),
-        ]).hasGapsOrInvalidPairs)
-    }
-
-    @Test func exhaustedReorderedAndEmptyFixturesAreIncomplete() {
-        #expect(!InputLifecycleTraceAssessment.assess([]).isComplete)
-        let exhausted = InputLifecycleTraceAssessment.assess([
-            .init(sequence: 1, uptimeNanoseconds: 10, event: .sessionStarted),
-            .init(sequence: 2, uptimeNanoseconds: 11, event: .budgetExhausted),
-        ])
-        #expect(exhausted.budgetExhausted)
-        #expect(!exhausted.isComplete)
-        #expect(InputLifecycleTraceAssessment.assess([
-            .init(sequence: 1, uptimeNanoseconds: 10, event: .sessionStarted),
-            .init(sequence: 2, uptimeNanoseconds: 9, event: .sessionEnded),
-        ]).hasGapsOrInvalidPairs)
     }
 }

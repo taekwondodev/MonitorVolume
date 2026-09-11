@@ -2,8 +2,6 @@
 
 import argparse
 import ast
-import fcntl
-import hashlib
 import json
 import os
 import plistlib
@@ -16,7 +14,6 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from hardware_proof import validate_hardware_proof
 
 
 APP_NAME = "ProArt Volume"
@@ -260,45 +257,6 @@ def launch_and_verify(
     return verify_bundle(bundle, require_live_process=True, require_notices=require_notices, identity=identity)
 
 
-def install_campaign_bundle(source_bundle: Path, identity: Dict[str, str], launch_arguments: Optional[List[str]] = None) -> Dict[str, Any]:
-    normalized = application_identity(identity)
-    destination = Path(normalized["installedBundle"])
-    verify_bundle(source_bundle, require_live_process=False, identity=normalized)
-    if destination.is_symlink():
-        raise RuntimeError(f"Installed bundle must not be a symlink: {destination}")
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    reused = destination.exists()
-    if reused:
-        verify_bundle(destination, require_live_process=False, identity=normalized)
-        if bundle_file_digests(destination) != bundle_file_digests(source_bundle):
-            raise RuntimeError("Existing campaign bundle does not match the retained bundle")
-    else:
-        staging = Path(tempfile.mkdtemp(prefix=f".{destination.stem}-install-", dir=destination.parent)) / destination.name
-        try:
-            shutil.copytree(source_bundle, staging, symlinks=False)
-            verify_bundle(staging, require_live_process=False, identity=normalized)
-            staging.rename(destination)
-        finally:
-            if staging.parent.exists():
-                shutil.rmtree(staging.parent)
-    verified = verify_bundle(destination, require_live_process=False, identity=normalized)
-    if launch_arguments is not None:
-        verified = launch_and_verify(destination, launch_arguments=launch_arguments, identity=normalized)
-    return {"status": "installed", "reused": reused, **verified}
-
-
-def bundle_file_digests(bundle: Path) -> Dict[str, str]:
-    if bundle.is_symlink() or not bundle.is_dir():
-        raise RuntimeError(f"Application bundle is missing or unsafe: {bundle}")
-    digests: Dict[str, str] = {}
-    for path in sorted(bundle.rglob("*")):
-        if path.is_symlink():
-            raise RuntimeError(f"Application bundle contains an unsafe symlink: {path}")
-        if path.is_file():
-            digests[str(path.relative_to(bundle))] = hashlib.sha256(path.read_bytes()).hexdigest()
-    return digests
-
-
 def rollback_install(backup: Path, replaced: bool, was_running: bool) -> None:
     if replaced and (not backup.exists() or backup.is_symlink()):
         raise RuntimeError("Previous application backup is unavailable for rollback")
@@ -389,7 +347,6 @@ def check_source() -> Dict[str, Any]:
         run(["bash", "-n", str(script)])
     python_files = [
         ROOT / "scripts" / "app_tool.py",
-        ROOT / "scripts" / "hardware_proof.py",
         ROOT / "Tests" / "Tooling" / "command_surface_test.py",
     ]
     for path in python_files:
@@ -419,50 +376,6 @@ def check_source() -> Dict[str, Any]:
     }
 
 
-def probe_monitor_status() -> Dict[str, Any]:
-    evidence_root = ROOT / ".hermes" / "verification" / "evidence"
-    evidence_root.mkdir(parents=True, exist_ok=True)
-    with (evidence_root.parent / "hardware-proof.lock").open("a") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        build_release()
-        executable = ROOT / ".build" / "release" / "ProArtVolumeRuntimeProbe"
-        if not executable.is_file() or not os.access(executable, os.X_OK):
-            raise RuntimeError(f"Runtime monitor probe is missing: {executable}")
-        stop_installed_app()
-        if exact_processes(INSTALLED_EXECUTABLE) or exact_processes(executable):
-            raise RuntimeError("A hardware owner is still running")
-        evidence_path = evidence_root / f"hardware-{time.time_ns()}.json"
-        evidence: Dict[str, Any] = {
-            "status": "failed",
-            "executableSHA256": hashlib.sha256(executable.read_bytes()).hexdigest(),
-            "installedExecutableSHA256": hashlib.sha256(INSTALLED_EXECUTABLE.read_bytes()).hexdigest(),
-        }
-        evidence_path.write_text(json.dumps(evidence, indent=2, sort_keys=True) + "\n")
-        try:
-            probe = subprocess.run([str(executable), "--verify-controls"], cwd=ROOT,
-                                   text=True, capture_output=True)
-            evidence.update(returncode=probe.returncode, stdout=probe.stdout, stderr=probe.stderr)
-            evidence_path.write_text(json.dumps(evidence, indent=2, sort_keys=True) + "\n")
-            report = json.loads(probe.stdout)
-            validate_hardware_proof(report)
-            evidence["report"] = report
-            if probe.returncode != (0 if report["status"] == "passed" else 5):
-                raise RuntimeError("Probe exit code disagrees with phase evidence")
-            evidence["status"] = report["status"]
-        except Exception as error:
-            evidence["error"] = str(error)
-        finally:
-            evidence_path.write_text(json.dumps(evidence, indent=2, sort_keys=True) + "\n")
-        return {**evidence, "evidence": str(evidence_path)}
-
-
-def current_revision() -> str:
-    revision = run(["git", "rev-parse", "HEAD"], cwd=ROOT).stdout.strip()
-    if len(revision) != 40 or any(character not in "0123456789abcdef" for character in revision):
-        raise RuntimeError("Git returned an invalid source revision")
-    return revision
-
-
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -470,7 +383,6 @@ def main() -> int:
         choices=(
             "build",
             "check",
-            "probe-monitor-status",
             "stop",
             "verify",
         ),
@@ -481,8 +393,6 @@ def main() -> int:
             result = install_and_launch()
         elif arguments.command == "check":
             result = check_source()
-        elif arguments.command == "probe-monitor-status":
-            result = probe_monitor_status()
         elif arguments.command == "stop":
             result = {"status": "stopped", "pids": stop_installed_app()}
         else:
