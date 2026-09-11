@@ -1,4 +1,3 @@
-import Dispatch
 import Synchronization
 
 package struct ControlSession: Equatable, Sendable {
@@ -18,7 +17,6 @@ package enum InputSuspensionReason: Equatable, Sendable {
     case permissionRevoked
     case tapDisabledByTimeout
     case tapDisabledByUserInput
-    case deliveryOverflow
     case tapCreationFailed
 }
 
@@ -51,30 +49,16 @@ package enum ControlEligibilityPhase: Equatable, Sendable {
     }
 }
 
-package struct InputAdmissionMetrics: Equatable, Sendable {
-    package let attemptedCount: UInt64
-    package let admittedCount: UInt64
-    package let rejectedCount: UInt64
-    package let discardedCount: UInt64
-    package let overflowCount: UInt64
-    package let completedCount: UInt64
-    package let peakOutstanding: Int
-    package let maximumDeliveryWaitNanoseconds: UInt64
-}
-
 package struct ControlEligibilitySnapshot: Equatable, Sendable {
     package let generation: UInt64
     package let phase: ControlEligibilityPhase
     package let session: ControlSession?
     package let tapOwnerActive: Bool
-    package let capacity: Int
     package let pendingDeliveryCount: Int
-    package let metrics: InputAdmissionMetrics
 }
 
 package struct AdmittedMediaKey: Equatable, Sendable {
     package let sequence: UInt64
-    package let acceptedAtNanoseconds: UInt64
     package let command: MediaKeyCommand
     package let session: ControlSession
 }
@@ -83,7 +67,6 @@ package enum InputAdmissionDecision: Equatable, Sendable {
     case passThrough
     case consumeKeyDown(AdmittedMediaKey)
     case consumeKeyUp
-    case passThroughAfterOverflow
 }
 
 package enum WakeResult: Equatable, Sendable {
@@ -104,43 +87,15 @@ package final class ControlEligibility: Sendable {
         var generation: UInt64 = 0
         var phase: ControlEligibilityPhase = .unavailable
         var tapOwnerActive = false
-        let capacity: Int
         var nextDeliverySequence: UInt64 = 0
         var queued: [AdmittedMediaKey] = []
-        var inFlight: [UInt64: AdmittedMediaKey] = [:]
         var consumedKeyDowns: Set<MediaKey> = []
-        var attemptedCount: UInt64 = 0
-        var admittedCount: UInt64 = 0
-        var rejectedCount: UInt64 = 0
-        var discardedCount: UInt64 = 0
-        var overflowCount: UInt64 = 0
-        var completedCount: UInt64 = 0
-        var peakOutstanding = 0
-        var maximumDeliveryWaitNanoseconds: UInt64 = 0
-
-        init(capacity: Int) {
-            self.capacity = capacity
-        }
-
-        var metrics: InputAdmissionMetrics {
-            InputAdmissionMetrics(
-                attemptedCount: attemptedCount,
-                admittedCount: admittedCount,
-                rejectedCount: rejectedCount,
-                discardedCount: discardedCount,
-                overflowCount: overflowCount,
-                completedCount: completedCount,
-                peakOutstanding: peakOutstanding,
-                maximumDeliveryWaitNanoseconds: maximumDeliveryWaitNanoseconds
-            )
-        }
     }
 
     private let state: Mutex<State>
 
-    package init(capacity: Int = 8) {
-        precondition(capacity > 0)
-        state = Mutex(State(capacity: capacity))
+    package init() {
+        state = Mutex(State())
     }
 
     package var generation: UInt64 { state.withLock { $0.generation } }
@@ -170,7 +125,7 @@ package final class ControlEligibility: Sendable {
     }
 
     package var pendingDeliveryCount: Int {
-        state.withLock { $0.queued.count + $0.inFlight.count }
+        state.withLock { $0.queued.count }
     }
 
     package var snapshot: ControlEligibilitySnapshot {
@@ -181,9 +136,7 @@ package final class ControlEligibility: Sendable {
                 phase: state.phase,
                 session: session,
                 tapOwnerActive: state.tapOwnerActive,
-                capacity: state.capacity,
-                pendingDeliveryCount: state.queued.count + state.inFlight.count,
-                metrics: state.metrics
+                pendingDeliveryCount: state.queued.count
             )
         }
     }
@@ -276,71 +229,32 @@ package final class ControlEligibility: Sendable {
         state.withLock { $0.phase == .eligible(session) }
     }
 
-    package func route(
-        _ event: MediaKeyEvent,
-        at uptimeNanoseconds: UInt64 = DispatchTime.now().uptimeNanoseconds
-    ) -> InputAdmissionDecision {
+    package func route(_ event: MediaKeyEvent) -> InputAdmissionDecision {
         state.withLock { state in
             switch event.phase {
             case .down:
-                state.attemptedCount &+= 1
-                guard state.tapOwnerActive else {
-                    state.rejectedCount &+= 1
+                guard state.tapOwnerActive, case let .eligible(session) = state.phase else {
                     return .passThrough
-                }
-                guard case let .eligible(session) = state.phase else {
-                    state.rejectedCount &+= 1
-                    return .passThrough
-                }
-                guard state.queued.count + state.inFlight.count < state.capacity else {
-                    state.rejectedCount &+= 1
-                    state.overflowCount &+= 1
-                    state.generation &+= 1
-                    state.phase = .suspended(.deliveryOverflow)
-                    discardQueued(&state)
-                    return .passThroughAfterOverflow
                 }
                 state.nextDeliverySequence &+= 1
                 let delivery = AdmittedMediaKey(
                     sequence: state.nextDeliverySequence,
-                    acceptedAtNanoseconds: uptimeNanoseconds,
                     command: event.key.command,
                     session: session
                 )
                 state.queued.append(delivery)
                 state.consumedKeyDowns.insert(event.key)
-                state.admittedCount &+= 1
-                state.peakOutstanding = max(state.peakOutstanding, state.queued.count + state.inFlight.count)
                 return .consumeKeyDown(delivery)
             case .up:
-                guard state.consumedKeyDowns.remove(event.key) != nil else {
-                    state.rejectedCount &+= 1
-                    return .passThrough
-                }
+                guard state.consumedKeyDowns.remove(event.key) != nil else { return .passThrough }
                 return .consumeKeyUp
             }
         }
     }
 
-    package func dequeue(
-        at uptimeNanoseconds: UInt64 = DispatchTime.now().uptimeNanoseconds
-    ) -> AdmittedMediaKey? {
+    package func dequeue() -> AdmittedMediaKey? {
         state.withLock { state in
-            guard !state.queued.isEmpty else { return nil }
-            let delivery = state.queued.removeFirst()
-            state.inFlight[delivery.sequence] = delivery
-            let wait = uptimeNanoseconds &- delivery.acceptedAtNanoseconds
-            state.maximumDeliveryWaitNanoseconds = max(state.maximumDeliveryWaitNanoseconds, wait)
-            return delivery
-        }
-    }
-
-    @discardableResult
-    package func complete(_ delivery: AdmittedMediaKey) -> Bool {
-        state.withLock { state in
-            guard state.inFlight.removeValue(forKey: delivery.sequence) != nil else { return false }
-            state.completedCount &+= 1
-            return true
+            state.queued.isEmpty ? nil : state.queued.removeFirst()
         }
     }
 
@@ -403,7 +317,6 @@ package final class ControlEligibility: Sendable {
     }
 
     private func discardQueued(_ state: inout State) {
-        state.discardedCount &+= UInt64(state.queued.count)
         state.queued.removeAll(keepingCapacity: true)
     }
 }

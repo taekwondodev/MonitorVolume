@@ -8,7 +8,6 @@ struct EligibilitySuspensionTests {
         .tapDisabledByTimeout,
         .tapDisabledByUserInput,
         .tapCreationFailed,
-        .deliveryOverflow,
     ])
     func suspensionRemainsLatchedUntilReopen(_ reason: InputSuspensionReason) throws {
         let gate = try makeEligibleGate()
@@ -21,7 +20,7 @@ struct EligibilitySuspensionTests {
         #expect(gate.phase == .suspended(reason))
         #expect(gate.generation > oldGeneration)
         #expect(!gate.allowsPermissionPolling)
-        #expect(gate.route(keyDown(.volumeUp), at: 10) == .passThrough)
+        #expect(gate.route(keyDown(.volumeUp)) == .passThrough)
         gate.publish(oldSession)
         #expect(gate.session == nil)
         gate.releaseTap()
@@ -48,7 +47,7 @@ struct EligibilitySuspensionTests {
         let gate = try makeEligibleGate()
 
         let firstGeneration = gate.suspend(.permissionRevoked)
-        let repeatedGeneration = gate.suspend(.deliveryOverflow)
+        let repeatedGeneration = gate.suspend(.tapCreationFailed)
 
         #expect(repeatedGeneration == firstGeneration)
         #expect(gate.phase == .suspended(.permissionRevoked))
@@ -74,7 +73,6 @@ struct EligibilitySuspensionTests {
         InputSuspensionReason.tapDisabledByTimeout,
         .tapDisabledByUserInput,
         .tapCreationFailed,
-        .deliveryOverflow,
     ])
     func systemSuspensionsDoNotWaitForPermission(_ reason: InputSuspensionReason) throws {
         let gate = try makeEligibleGate()
@@ -84,36 +82,23 @@ struct EligibilitySuspensionTests {
     }
 
     @Test
-    func passThroughAfterOverflowDiscardsHeldDeliveryAndPassesTheRejectedKey() throws {
-        let gate = try makeEligibleGate(capacity: 2)
-        let first = gate.route(keyDown(.volumeUp), at: 10)
-        let second = gate.route(keyDown(.volumeDown), at: 20)
-
-        guard case .consumeKeyDown = first, case .consumeKeyDown = second else {
-            Issue.record("expected the configured capacity to be admitted")
-            return
+    func rapidPressesAreAllAdmittedWithoutSuspending() throws {
+        let gate = try makeEligibleGate()
+        for _ in 0..<50 {
+            guard case .consumeKeyDown = gate.route(keyDown(.volumeUp)) else {
+                Issue.record("every rapid press must be admitted")
+                return
+            }
         }
-        #expect(gate.pendingDeliveryCount == 2)
-        #expect(gate.route(keyDown(.mute), at: 30) == .passThroughAfterOverflow)
-        #expect(gate.phase == .suspended(.deliveryOverflow))
-        #expect(gate.pendingDeliveryCount == 0)
-        #expect(gate.snapshot.metrics == InputAdmissionMetrics(
-            attemptedCount: 3,
-            admittedCount: 2,
-            rejectedCount: 1,
-            discardedCount: 2,
-            overflowCount: 1,
-            completedCount: 0,
-            peakOutstanding: 2,
-            maximumDeliveryWaitNanoseconds: 0
-        ))
-        #expect(gate.route(keyDown(.volumeUp), at: 40) == .passThrough)
+        #expect(gate.pendingDeliveryCount == 50)
+        #expect(gate.session != nil)
+        #expect(!gate.phase.isSuspended)
     }
 
     @Test
     func reopenWaitsForOldTapOwnerTeardown() throws {
         let gate = try makeEligibleGate()
-        _ = gate.route(keyDown(.volumeUp), at: 10)
+        _ = gate.route(keyDown(.volumeUp))
         let generation = gate.generation
         let session = try #require(gate.session)
 
@@ -144,9 +129,9 @@ struct EligibilitySuspensionTests {
     }
 
     @Test
-    func staleDeliveryStillCompletesButNeverRestoresEligibility() throws {
+    func deliveryDequeuedBeforeSuspensionIsNoLongerEligible() throws {
         let gate = try makeEligibleGate()
-        guard case let .consumeKeyDown(delivery) = gate.route(keyDown(.volumeUp), at: 10) else {
+        guard case let .consumeKeyDown(delivery) = gate.route(keyDown(.volumeUp)) else {
             Issue.record("expected an admitted delivery")
             return
         }
@@ -154,8 +139,7 @@ struct EligibilitySuspensionTests {
         _ = gate.suspend(.permissionRevoked)
 
         #expect(!gate.contains(delivery.session))
-        #expect(gate.complete(delivery))
-        #expect(gate.snapshot.metrics.completedCount == 1)
+        #expect(gate.pendingDeliveryCount == 0)
     }
 
     @Test
@@ -163,7 +147,7 @@ struct EligibilitySuspensionTests {
         let gate = try makeEligibleGate()
         gate.releaseTap()
 
-        #expect(gate.route(keyDown(.volumeUp), at: 10) == .passThrough)
+        #expect(gate.route(keyDown(.volumeUp)) == .passThrough)
         guard case let .started(generation) = gate.reopen() else {
             Issue.record("reopen must start after tap release")
             return
@@ -176,6 +160,6 @@ struct EligibilitySuspensionTests {
         )
         gate.publish(session)
         #expect(gate.claimTapOwner(generation: generation))
-        #expect(gate.route(keyDown(.volumeUp), at: 20) != .passThrough)
+        #expect(gate.route(keyDown(.volumeUp)) != .passThrough)
     }
 }

@@ -41,7 +41,7 @@ One exception, forced by fact 8: while the app waits for permission (`missingPer
 
 ### Handoff without capacity
 
-The callback hands accepted key-downs to the main thread through a plain FIFO. The main thread drains it within one run-loop turn, and `IntentControlService` keeps only the latest desired state, so rapid presses coalesce at the hardware boundary. The earlier admission capacity of eight, the `deliveryOverflow` suspension, and the admission metrics are removed (#35). Ordering and key-down/key-up pairing remain so that a consumed key-down never lets its key-up escape to the system.
+The callback hands accepted key-downs to the main thread through a plain FIFO. The main thread drains it within one run-loop turn, and `IntentControlService` keeps only the latest desired state, so rapid presses coalesce at the hardware boundary. The earlier admission capacity of eight, the `deliveryOverflow` suspension, and the admission metrics are removed (#35). Verified by the user with a burst of more than ten presses: the OSD followed every press, the monitor landed on the final value, and the app stayed active. Ordering and key-down/key-up pairing remain so that a consumed key-down never lets its key-up escape to the system.
 
 ### Revalidation
 

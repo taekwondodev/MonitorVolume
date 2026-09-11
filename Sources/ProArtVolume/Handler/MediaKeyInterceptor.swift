@@ -183,10 +183,6 @@ final class MediaKeyInterceptor {
         case .consumeKeyUp:
             diagnostics?.record(.handoff(.pairedKeyUp, generation: eligibility.generation, deliverySequence: 0))
             return false
-        case .passThroughAfterOverflow:
-            diagnostics?.record(.handoff(.overflow, generation: eligibility.generation, deliverySequence: 0))
-            scheduleSuspensionNotification(.deliveryOverflow, generation: eligibility.generation)
-            return true
         }
     }
 
@@ -235,7 +231,6 @@ final class MediaKeyInterceptor {
 
     private func consumeDeliveries() {
         while let delivery = eligibility.dequeue() {
-            defer { _ = eligibility.complete(delivery) }
             guard eligibility.contains(delivery.session) else {
                 diagnostics?.record(.handoff(
                     .staleDiscarded,

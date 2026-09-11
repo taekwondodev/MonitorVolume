@@ -273,8 +273,6 @@ final class ApplicationCoordinator: NSObject, NSApplicationDelegate, MediaKeyInt
             .permissionRevoked
         case .tapDisabledByTimeout, .tapDisabledByUserInput:
             .disabledTap
-        case .deliveryOverflow:
-            .deliveryOverflow
         case .tapCreationFailed:
             .creationFailure
         }

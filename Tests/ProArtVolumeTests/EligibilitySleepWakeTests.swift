@@ -29,12 +29,12 @@ struct EligibilitySleepWakeTests {
         gate.publish(refreshed)
         #expect(gate.contains(refreshed))
 
-        _ = gate.suspend(.deliveryOverflow)
+        _ = gate.suspend(.tapCreationFailed)
         let suspendedSleepGeneration = gate.sleep()
         #expect(gate.sleep() > suspendedSleepGeneration)
-        #expect(gate.phase == .sleepingWhileSuspended(.deliveryOverflow))
-        #expect(gate.wake() == .remainsSuspended(.deliveryOverflow))
-        #expect(gate.phase == .suspended(.deliveryOverflow))
+        #expect(gate.phase == .sleepingWhileSuspended(.tapCreationFailed))
+        #expect(gate.wake() == .remainsSuspended(.tapCreationFailed))
+        #expect(gate.phase == .suspended(.tapCreationFailed))
         #expect(gate.session == nil)
         #expect(!gate.allowsPermissionPolling)
     }
@@ -42,7 +42,7 @@ struct EligibilitySleepWakeTests {
     @Test
     func wakeWaitsForTapReleaseWithoutBlocking() throws {
         let gate = try makeEligibleGate()
-        _ = gate.route(keyDown(.volumeUp), at: 10)
+        _ = gate.route(keyDown(.volumeUp))
         _ = gate.sleep()
 
         #expect(gate.wake() == .waitingForTapRelease)
@@ -67,7 +67,7 @@ struct EligibilitySleepWakeTests {
 
     @Test
     func wakeFromUnavailableLifecycleDoesNotClaimHardwareEligibility() {
-        let gate = ControlEligibility(capacity: 2)
+        let gate = ControlEligibility()
         let sleepingGeneration = gate.sleep()
 
         #expect(gate.phase == .sleepingWhileUnavailable)

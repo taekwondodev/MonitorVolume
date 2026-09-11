@@ -1,8 +1,8 @@
 import Testing
 @testable import ProArtVolumeCore
 
-func makeEligibleGate(capacity: Int = 8, volume: Int = 50) throws -> ControlEligibility {
-    let gate = ControlEligibility(capacity: capacity)
+func makeEligibleGate(volume: Int = 50) throws -> ControlEligibility {
+    let gate = ControlEligibility()
     guard case let .started(generation) = gate.reopen() else {
         Issue.record("eligible fixture could not reopen")
         return gate
