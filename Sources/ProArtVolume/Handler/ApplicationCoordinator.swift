@@ -57,7 +57,6 @@ final class ApplicationCoordinator: NSObject, NSApplicationDelegate, MediaKeyInt
         let key = "launchAtLoginRegistrationAttempted"
         guard !defaults.bool(forKey: key) else { return }
         defaults.set(true, forKey: key)
-        // Flush before registration so a failed system call cannot be retried on the next launch.
         _ = defaults.synchronize()
         try? SMAppService.mainApp.register()
     }
