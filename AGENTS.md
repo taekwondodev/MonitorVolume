@@ -6,7 +6,7 @@ Use the repository command surface:
 
 - `make test` runs the Swift test suite.
 - `make check` runs the strict-concurrency Release build and tooling checks.
-- `make build` builds, signs, installs, and launches `~/Applications/ProArt Volume.app`.
+- `make build` builds, signs, installs, and launches `~/Applications/ProArt Volume.app`. The new signature invalidates the Accessibility grant: toggle it off and on before testing input.
 - `make verify` verifies the installed bundle and exact live process.
 - `make clean` removes only SwiftPM build artifacts.
 
