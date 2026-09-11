@@ -11,6 +11,8 @@ Verify the installed Release application through the repository-owned build and 
 
 Run `make test` and `make check` before installation. Issue #32 candidate worktrees additionally use `make offline-contract` with explicit candidate, immutable source ref, and a fresh evidence directory; it runs one candidate gate and never performs A/B collection. Its comparative procedure is frozen separately in `scripts/issue32_collection_protocol.json`; validate or render it with `scripts/issue32_collection_protocol.py` without running either candidate. Use `make build` and `make verify` to install and check the real signed bundle and sole live process. Ordinary verification is non-invasive and does not prove hardware control, permission visibility, or OSD visuals.
 
+Issue #33's installed comparison is separately frozen in `scripts/issue33_live_protocol.json`. Validate it with `make issue33-protocol` and check clean pinned candidates with `make issue33-doctor`. Neither command grants runtime consent. A separate `make issue33-setup` consent boundary installs the two manifest-bound candidate identities and waits for manual Accessibility grants plus per-candidate readiness. Before setup or any authorized run, keep `make issue33-stop` ready in a Terminal window and follow `references/features/live-comparison.md` exactly. During a measured run, the operator types every phase acknowledgement directly in that runner Terminal. Do not relay active-run prompts through chat or another mediated channel. Final `make issue33-cleanup` removes only the two verified campaign bundles after the operator records manual Accessibility-entry removal.
+
 ## Explicit hardware proof
 
 Run from the repository root:

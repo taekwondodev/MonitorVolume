@@ -29,6 +29,27 @@ INSTALLED_BUNDLE = Path.home() / "Applications" / f"{APP_NAME}.app"
 INSTALLED_EXECUTABLE = INSTALLED_BUNDLE / "Contents" / "MacOS" / EXECUTABLE_NAME
 
 
+def application_identity(identity: Optional[Dict[str, str]] = None) -> Dict[str, str]:
+    if identity is None:
+        identity = {
+            "bundleIdentifier": source_metadata()["CFBundleIdentifier"],
+            "bundleName": APP_NAME,
+            "installedBundle": str(INSTALLED_BUNDLE),
+            "executableName": EXECUTABLE_NAME,
+        }
+    required = {"bundleIdentifier", "bundleName", "installedBundle", "executableName"}
+    if not required.issubset(identity) or not all(
+        isinstance(identity[key], str) and identity[key] for key in required
+    ):
+        raise RuntimeError("Application identity is incomplete")
+    if identity["executableName"] != EXECUTABLE_NAME:
+        raise RuntimeError("Application identity executable does not match the product")
+    bundle = Path(identity["installedBundle"]).expanduser()
+    if not bundle.is_absolute():
+        raise RuntimeError("Application identity installed path must be absolute")
+    return {**identity, "installedBundle": str(bundle), "installedExecutable": str(bundle / "Contents" / "MacOS" / EXECUTABLE_NAME)}
+
+
 def emit(payload: Dict[str, Any]) -> None:
     print(json.dumps(payload, indent=2, sort_keys=True))
 
@@ -73,8 +94,17 @@ def source_metadata() -> Dict[str, Any]:
     return metadata
 
 
-def load_metadata(path: Path) -> Dict[str, Any]:
+def expected_metadata(identity: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
     expected = source_metadata()
+    if identity is not None:
+        normalized = application_identity(identity)
+        expected["CFBundleIdentifier"] = normalized["bundleIdentifier"]
+        expected["CFBundleName"] = normalized["bundleName"]
+    return expected
+
+
+def load_metadata(path: Path, identity: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
+    expected = expected_metadata(identity)
     metadata = read_metadata(path)
     if metadata != expected:
         raise RuntimeError("Bundle metadata does not match Resources/Info.plist")
@@ -99,7 +129,11 @@ def build_release() -> Path:
     return executable
 
 
-def assemble_bundle(destination: Path, source_executable: Path) -> None:
+def assemble_bundle(
+    destination: Path,
+    source_executable: Path,
+    identity: Optional[Dict[str, str]] = None,
+) -> None:
     if destination.exists() or destination.is_symlink():
         raise RuntimeError(f"Staging destination already exists: {destination}")
     executable_dir = destination / "Contents" / "MacOS"
@@ -107,11 +141,12 @@ def assemble_bundle(destination: Path, source_executable: Path) -> None:
     resources_dir = destination / "Contents" / "Resources"
     resources_dir.mkdir()
     shutil.copy2(source_executable, executable_dir / EXECUTABLE_NAME)
-    shutil.copy2(SOURCE_PLIST, destination / "Contents" / "Info.plist")
+    with (destination / "Contents" / "Info.plist").open("wb") as file:
+        plistlib.dump(expected_metadata(identity), file, sort_keys=True)
     shutil.copy2(SOURCE_NOTICES, resources_dir / SOURCE_NOTICES.name)
-    load_metadata(destination / "Contents" / "Info.plist")
+    load_metadata(destination / "Contents" / "Info.plist", identity)
     run(["codesign", "--force", "--sign", "-", str(destination)])
-    verify_bundle(destination, require_live_process=False)
+    verify_bundle(destination, require_live_process=False, identity=identity)
 
 
 def exact_processes(executable: Path) -> List[int]:
@@ -161,10 +196,12 @@ def verify_bundle(
     bundle: Path,
     require_live_process: bool,
     require_notices: bool = True,
+    identity: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
+    normalized = application_identity(identity)
     contents = bundle / "Contents"
     executable_dir = contents / "MacOS"
-    executable = executable_dir / EXECUTABLE_NAME
+    executable = executable_dir / normalized["executableName"]
     if any(path.is_symlink() for path in (bundle, contents, executable_dir, executable)):
         raise RuntimeError(f"Application bundle contains an unsafe symlink: {bundle}")
     if not bundle.is_dir():
@@ -176,7 +213,7 @@ def verify_bundle(
     notices_valid = notices.is_file() and notices.read_bytes() == SOURCE_NOTICES.read_bytes()
     if require_notices and not notices_valid:
         raise RuntimeError(f"Third-party notices are missing or invalid: {notices}")
-    metadata = load_metadata(plist)
+    metadata = load_metadata(plist, identity)
     run(["codesign", "--verify", "--deep", "--strict", str(bundle)])
     pids = exact_processes(executable)
     if require_live_process and len(pids) != 1:
@@ -209,6 +246,7 @@ def launch_and_verify(
     bundle: Path,
     require_notices: bool = True,
     launch_arguments: Optional[List[str]] = None,
+    identity: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
     command = ["open", "-n", "-a", str(bundle)]
     if launch_arguments:
@@ -216,10 +254,50 @@ def launch_and_verify(
     run(command)
     deadline = time.monotonic() + 10
     while time.monotonic() < deadline:
-        if len(exact_processes(INSTALLED_EXECUTABLE)) == 1:
+        executable = Path(application_identity(identity)["installedExecutable"])
+        if len(exact_processes(executable)) == 1:
             break
         time.sleep(0.1)
-    return verify_bundle(bundle, require_live_process=True, require_notices=require_notices)
+    return verify_bundle(bundle, require_live_process=True, require_notices=require_notices, identity=identity)
+
+
+def install_campaign_bundle(source_bundle: Path, identity: Dict[str, str], launch_arguments: Optional[List[str]] = None) -> Dict[str, Any]:
+    normalized = application_identity(identity)
+    destination = Path(normalized["installedBundle"])
+    verify_bundle(source_bundle, require_live_process=False, identity=normalized)
+    if destination.is_symlink():
+        raise RuntimeError(f"Installed bundle must not be a symlink: {destination}")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    reused = destination.exists()
+    if reused:
+        verify_bundle(destination, require_live_process=False, identity=normalized)
+        if bundle_file_digests(destination) != bundle_file_digests(source_bundle):
+            raise RuntimeError("Existing campaign bundle does not match the retained bundle")
+    else:
+        staging = Path(tempfile.mkdtemp(prefix=f".{destination.stem}-install-", dir=destination.parent)) / destination.name
+        try:
+            shutil.copytree(source_bundle, staging, symlinks=False)
+            verify_bundle(staging, require_live_process=False, identity=normalized)
+            staging.rename(destination)
+        finally:
+            if staging.parent.exists():
+                shutil.rmtree(staging.parent)
+    verified = verify_bundle(destination, require_live_process=False, identity=normalized)
+    if launch_arguments is not None:
+        verified = launch_and_verify(destination, launch_arguments=launch_arguments, identity=normalized)
+    return {"status": "installed", "reused": reused, **verified}
+
+
+def bundle_file_digests(bundle: Path) -> Dict[str, str]:
+    if bundle.is_symlink() or not bundle.is_dir():
+        raise RuntimeError(f"Application bundle is missing or unsafe: {bundle}")
+    digests: Dict[str, str] = {}
+    for path in sorted(bundle.rglob("*")):
+        if path.is_symlink():
+            raise RuntimeError(f"Application bundle contains an unsafe symlink: {path}")
+        if path.is_file():
+            digests[str(path.relative_to(bundle))] = hashlib.sha256(path.read_bytes()).hexdigest()
+    return digests
 
 
 def rollback_install(backup: Path, replaced: bool, was_running: bool) -> None:
@@ -236,7 +314,7 @@ def rollback_install(backup: Path, replaced: bool, was_running: bool) -> None:
             launch_and_verify(INSTALLED_BUNDLE, require_notices=False)
 
 
-def install_and_launch(launch_arguments: Optional[List[str]] = None) -> Dict[str, Any]:
+def replace_and_launch(staged_bundle: Path, launch_arguments: Optional[List[str]]) -> Dict[str, Any]:
     applications = INSTALLED_BUNDLE.parent
     if applications.is_symlink():
         raise RuntimeError(f"Applications directory must not be a symlink: {applications}")
@@ -247,37 +325,44 @@ def install_and_launch(launch_arguments: Optional[List[str]] = None) -> Dict[str
         raise RuntimeError(f"Installed bundle must not be a symlink: {INSTALLED_BUNDLE}")
     if INSTALLED_BUNDLE.exists():
         verify_bundle(INSTALLED_BUNDLE, require_live_process=False, require_notices=False)
-    source_executable = build_release()
-    staging_root = Path(tempfile.mkdtemp(prefix=".ProArtVolume-install-", dir=applications))
-    staged_bundle = staging_root / INSTALLED_BUNDLE.name
+    stopped = stop_installed_app()
+    replaced = INSTALLED_BUNDLE.exists()
     try:
-        assemble_bundle(staged_bundle, source_executable)
-        stopped = stop_installed_app()
-        replaced = INSTALLED_BUNDLE.exists()
+        if replaced:
+            INSTALLED_BUNDLE.rename(backup)
+        staged_bundle.rename(INSTALLED_BUNDLE)
+        verified = launch_and_verify(INSTALLED_BUNDLE, launch_arguments=launch_arguments)
+    except Exception as install_error:
         try:
-            if replaced:
-                INSTALLED_BUNDLE.rename(backup)
-            staged_bundle.rename(INSTALLED_BUNDLE)
-            verified = launch_and_verify(INSTALLED_BUNDLE, launch_arguments=launch_arguments)
-        except Exception as install_error:
-            try:
-                rollback_install(backup, replaced, bool(stopped))
-            except Exception as rollback_error:
-                raise RuntimeError(f"Install failed ({install_error}); rollback failed ({rollback_error})") from rollback_error
-            raise
-        backup_cleanup_pending = False
-        if backup.exists():
-            try:
-                shutil.rmtree(backup)
-            except Exception:
-                backup_cleanup_pending = True
-        return {
-            "status": "installed",
-            "backup_cleanup_pending": backup_cleanup_pending,
-            "replaced_existing_bundle": replaced,
-            "stopped_pids": stopped,
-            **verified,
-        }
+            rollback_install(backup, replaced, bool(stopped))
+        except Exception as rollback_error:
+            raise RuntimeError(f"Install failed ({install_error}); rollback failed ({rollback_error})") from rollback_error
+        raise
+    backup_cleanup_pending = False
+    if backup.exists():
+        try:
+            shutil.rmtree(backup)
+        except Exception:
+            backup_cleanup_pending = True
+    return {
+        "status": "installed",
+        "backup_cleanup_pending": backup_cleanup_pending,
+        "replaced_existing_bundle": replaced,
+        "stopped_pids": stopped,
+        **verified,
+    }
+
+
+def install_and_launch(launch_arguments: Optional[List[str]] = None) -> Dict[str, Any]:
+    applications = INSTALLED_BUNDLE.parent
+    if applications.is_symlink():
+        raise RuntimeError(f"Applications directory must not be a symlink: {applications}")
+    applications.mkdir(parents=True, exist_ok=True)
+    staging_root = Path(tempfile.mkdtemp(prefix=".ProArtVolume-install-", dir=applications))
+    try:
+        staged_bundle = staging_root / INSTALLED_BUNDLE.name
+        assemble_bundle(staged_bundle, build_release())
+        return replace_and_launch(staged_bundle, launch_arguments)
     finally:
         if staging_root.exists():
             shutil.rmtree(staging_root)
@@ -310,6 +395,8 @@ def check_source() -> Dict[str, Any]:
         ROOT / "scripts" / "issue32_apparatus.py",
         ROOT / "scripts" / "issue32_collector.py",
         ROOT / "scripts" / "issue32_collection_protocol.py",
+        ROOT / "scripts" / "issue33_live.py",
+        ROOT / "scripts" / "issue33_live_protocol.py",
         ROOT / "scripts" / "offline_policy_probe.py",
         ROOT / "scripts" / "issue32_conformance.py",
         ROOT / "Tests" / "Tooling" / "command_surface_test.py",
@@ -317,12 +404,15 @@ def check_source() -> Dict[str, Any]:
         ROOT / "Tests" / "Tooling" / "issue32_apparatus_test.py",
         ROOT / "Tests" / "Tooling" / "issue32_collector_test.py",
         ROOT / "Tests" / "Tooling" / "issue32_collection_protocol_test.py",
+        ROOT / "Tests" / "Tooling" / "issue33_live_test.py",
+        ROOT / "Tests" / "Tooling" / "issue33_live_protocol_test.py",
         ROOT / ".hermes" / "skills" / "verify-proart-volume" / "scripts" / "verify.py",
     ]
     for path in python_files:
         ast.parse(path.read_text(), filename=str(path))
     json.loads((ROOT / "scripts" / "issue32_expected_scenarios.json").read_text())
     json.loads((ROOT / "scripts" / "issue32_collection_protocol.json").read_text())
+    json.loads((ROOT / "scripts" / "issue33_live_protocol.json").read_text())
     run(["swiftc", "-parse", str(ROOT / "scripts" / "Issue32EnvironmentProbe.swift")])
     run(["git", "diff", "--check"], cwd=ROOT)
     load_metadata(SOURCE_PLIST)

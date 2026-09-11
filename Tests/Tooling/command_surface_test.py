@@ -42,6 +42,11 @@ class CommandSurfaceTests(unittest.TestCase):
             "measure-latency": "scripts/measure-latency.sh",
             "latency-report": "scripts/latency-report.sh",
             "offline-contract": "scripts/offline-contract.sh",
+            "issue33-protocol": "scripts/issue33_live_protocol.py",
+            "issue33-doctor": "scripts/issue33-live.sh",
+            "issue33-setup": "scripts/issue33-live.sh",
+            "issue33-stop": "scripts/issue33-live.sh",
+            "issue33-cleanup": "scripts/issue33-live.sh",
             "clean": "swift package clean",
         }
         for target, expected_command in expected_commands.items():
