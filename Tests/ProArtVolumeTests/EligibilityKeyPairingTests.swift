@@ -3,6 +3,19 @@ import Testing
 
 struct EligibilityKeyPairingTests {
     @Test
+    func volumeOnlySessionConsumesVolumeAndPassesBothMutePhasesThrough() throws {
+        let gate = try makeEligibleGate(mute: .unsupported)
+
+        guard case .consumeKeyDown = gate.route(keyDown(.volumeDown)) else {
+            Issue.record("volume-down must be admitted for a volume-only session")
+            return
+        }
+        #expect(gate.route(keyUp(.volumeDown)) == .consumeKeyUp)
+        #expect(gate.route(keyDown(.mute)) == .passThrough)
+        #expect(gate.route(keyUp(.mute)) == .passThrough)
+    }
+
+    @Test
     func keyUpPairingSurvivesSuspensionUntilTapRelease() throws {
         let gate = try makeEligibleGate()
         _ = gate.route(keyDown(.volumeUp))

@@ -3,11 +3,18 @@ import Synchronization
 package struct ControlSession: Equatable, Sendable {
     package let generation: UInt64
     package let seedRevision: UInt64
+    package let target: ResolvedMonitorTarget
     package let seed: ConfirmedMonitorState
 
-    package init(generation: UInt64, seedRevision: UInt64, seed: ConfirmedMonitorState) {
+    package init(
+        generation: UInt64,
+        seedRevision: UInt64,
+        target: ResolvedMonitorTarget,
+        seed: ConfirmedMonitorState
+    ) {
         self.generation = generation
         self.seedRevision = seedRevision
+        self.target = target
         self.seed = seed
     }
 }
@@ -234,6 +241,9 @@ package final class ControlEligibility: Sendable {
             switch event.phase {
             case .down:
                 guard state.tapOwnerActive, case let .eligible(session) = state.phase else {
+                    return .passThrough
+                }
+                guard session.target.capabilities.supports(event.key.command) else {
                     return .passThrough
                 }
                 state.nextDeliverySequence &+= 1

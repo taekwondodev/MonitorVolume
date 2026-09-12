@@ -1,18 +1,14 @@
 import MonitorTransport
 
 package struct DDCMonitorRepository: MonitorControlling {
-    private let identity: MonitorIdentity
-
-    package init(identity: MonitorIdentity) {
-        self.identity = identity
-    }
+    package init() {}
 
     @concurrent
-    package func readState() async throws(MonitorRepositoryError) -> ConfirmedMonitorState? {
+    package func readState(for target: MonitorIdentity) async throws(MonitorRepositoryError) -> ConfirmedMonitorState? {
         let result = PAVDDCReadTargetState(
-            identity.manufacturer,
-            identity.productID,
-            identity.serial
+            target.manufacturer,
+            target.productID,
+            target.serial
         )
         switch result.status {
         case PAVDDCStatusTargetUnavailable:
@@ -23,11 +19,21 @@ package struct DDCMonitorRepository: MonitorControlling {
             throw .malformedResponse
         case PAVDDCStatusSuccess:
             guard result.volumeMaximum == 100,
-                  result.muteMaximum == 2,
                   let volume = VolumeLevel(Int(result.volumeCurrent)) else {
                 throw .malformedResponse
             }
-            let mute = try MuteState(hardwareValue: result.muteCurrent)
+            let mute: MonitorMuteState
+            switch result.muteStatus {
+            case PAVDDCStatusSuccess:
+                guard result.muteMaximum == 2 else { throw .malformedResponse }
+                mute = .supported(try MuteState(hardwareValue: result.muteCurrent))
+            case PAVDDCStatusUnsupported:
+                mute = .unsupported
+            case PAVDDCStatusReadFailure:
+                throw .readFailure
+            default:
+                throw .malformedResponse
+            }
             return ConfirmedMonitorState(volume: volume, mute: mute)
         default:
             throw .malformedResponse
@@ -35,11 +41,14 @@ package struct DDCMonitorRepository: MonitorControlling {
     }
 
     @concurrent
-    package func writeVolume(_ volume: VolumeLevel) async throws(MonitorRepositoryError) -> VolumeLevel {
+    package func writeVolume(
+        _ volume: VolumeLevel,
+        for target: MonitorIdentity
+    ) async throws(MonitorRepositoryError) -> VolumeLevel {
         let result = PAVDDCWriteTargetVolume(
-            identity.manufacturer,
-            identity.productID,
-            identity.serial,
+            target.manufacturer,
+            target.productID,
+            target.serial,
             UInt16(volume.rawValue)
         )
         try validateWriteStatus(result.status)
@@ -54,11 +63,14 @@ package struct DDCMonitorRepository: MonitorControlling {
     }
 
     @concurrent
-    package func writeMute(_ mute: MuteState) async throws(MonitorRepositoryError) -> MuteState {
+    package func writeMute(
+        _ mute: MuteState,
+        for target: MonitorIdentity
+    ) async throws(MonitorRepositoryError) -> MuteState {
         let result = PAVDDCWriteTargetMute(
-            identity.manufacturer,
-            identity.productID,
-            identity.serial,
+            target.manufacturer,
+            target.productID,
+            target.serial,
             mute.hardwareValue
         )
         try validateWriteStatus(result.status)
@@ -76,7 +88,7 @@ package struct DDCMonitorRepository: MonitorControlling {
         switch status {
         case PAVDDCStatusSuccess:
             return
-        case PAVDDCStatusTargetUnavailable, PAVDDCStatusWriteFailure:
+        case PAVDDCStatusTargetUnavailable, PAVDDCStatusWriteFailure, PAVDDCStatusUnsupported:
             throw .writeFailure
         case PAVDDCStatusReadFailure:
             throw .readFailure

@@ -100,16 +100,23 @@ package actor IntentControlService {
     private func readTrustedState(generation: UInt64) async {
         guard isCurrent(generation) else { return }
         do {
-            guard try await activeOutput.isTargetActive(), isCurrent(generation) else { return }
-            guard let state = try await monitor.readState() else {
+            guard let audioDisplay = try await activeOutput.resolveTarget(), isCurrent(generation) else { return }
+            guard let state = try await monitor.readState(for: audioDisplay.identity) else {
                 fail(generation: generation)
                 return
             }
             guard isCurrent(generation) else { return }
-            guard try await activeOutput.isTargetActive(), isCurrent(generation) else { return }
+            guard try await activeOutput.resolveTarget()?.identity == audioDisplay.identity,
+                  isCurrent(generation) else { return }
             confirmed = state
             seedRevision += 1
-            eligibility.publish(ControlSession(generation: generation, seedRevision: seedRevision, seed: state))
+            let target = ResolvedMonitorTarget(audioDisplay: audioDisplay, capabilities: state.mute.capabilities)
+            eligibility.publish(ControlSession(
+                generation: generation,
+                seedRevision: seedRevision,
+                target: target,
+                seed: state
+            ))
             backoff = RecoveryDelay()
             cancelRecovery()
         } catch {
@@ -129,20 +136,21 @@ package actor IntentControlService {
             guard try await mayWrite(request.session) else { return .discarded }
             if desired != nil { return .superseded }
             if request.intent.volume != state.volume {
-                let volume = try await monitor.writeVolume(request.intent.volume)
+                let volume = try await monitor.writeVolume(request.intent.volume, for: request.session.target.identity)
                 guard isCurrent(request.session.generation) else { return .discarded }
                 guard volume == request.intent.volume else { throw MonitorRepositoryError.readBackMismatch }
                 state = ConfirmedMonitorState(volume: volume, mute: state.mute)
                 confirmed = state
             }
             if desired != nil { return .superseded }
-            if request.intent.mute != state.mute {
+            if case let .supported(requestedMute) = request.intent.mute,
+               request.intent.mute != state.mute {
                 guard try await mayWrite(request.session) else { return .discarded }
                 if desired != nil { return .superseded }
-                let mute = try await monitor.writeMute(request.intent.mute)
+                let mute = try await monitor.writeMute(requestedMute, for: request.session.target.identity)
                 guard isCurrent(request.session.generation) else { return .discarded }
-                guard mute == request.intent.mute else { throw MonitorRepositoryError.readBackMismatch }
-                state = ConfirmedMonitorState(volume: state.volume, mute: mute)
+                guard mute == requestedMute else { throw MonitorRepositoryError.readBackMismatch }
+                state = ConfirmedMonitorState(volume: state.volume, mute: .supported(mute))
                 confirmed = state
             }
             return isCurrent(request.session.generation) ? .completed : .discarded
@@ -154,7 +162,7 @@ package actor IntentControlService {
 
     private func mayWrite(_ session: ControlSession) async throws(MonitorRepositoryError) -> Bool {
         guard isCurrent(session.generation), eligibility.contains(session) else { return false }
-        let active = try await activeOutput.isTargetActive()
+        let active = try await activeOutput.resolveTarget()?.identity == session.target.identity
         guard isCurrent(session.generation), eligibility.contains(session) else { return false }
         if !active {
             eligibility.markUnavailable(generation: session.generation)

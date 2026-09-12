@@ -6,11 +6,10 @@ enum ProArtVolumeApp {
     @MainActor static func main() {
         let app = NSApplication.shared
         app.setActivationPolicy(.accessory)
-        let identity = MonitorIdentity.target
-        let activeOutput = CoreAudioOutputRepository(identity: identity)
+        let activeOutput = CoreAudioOutputRepository()
         let eligibility = ControlEligibility()
         let service = IntentControlService(
-            monitor: DDCMonitorRepository(identity: identity),
+            monitor: DDCMonitorRepository(),
             activeOutput: activeOutput,
             eligibility: eligibility
         )

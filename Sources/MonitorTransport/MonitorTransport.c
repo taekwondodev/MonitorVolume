@@ -69,6 +69,28 @@ static bool PAVStringMatches(CFTypeRef value, const char *expected) {
     return matches;
 }
 
+static bool PAVCopyString(CFTypeRef value, char *output, uint32_t capacity) {
+    if (value == NULL || CFGetTypeID(value) != CFStringGetTypeID() || capacity == 0) {
+        return false;
+    }
+    return CFStringGetCString((CFStringRef)value, output, capacity, kCFStringEncodingUTF8);
+}
+
+static bool PAVOutputNameMatches(CFTypeRef productNameValue, const char *outputName) {
+    char productName[128] = {0};
+    if (!PAVCopyString(productNameValue, productName, sizeof(productName))) {
+        return false;
+    }
+    if (strcmp(outputName, productName) == 0) {
+        return true;
+    }
+    size_t outputLength = strlen(outputName);
+    size_t productLength = strlen(productName);
+    return outputLength > productLength
+        && outputName[outputLength - productLength - 1] == ' '
+        && strcmp(outputName + outputLength - productLength, productName) == 0;
+}
+
 static bool PAVNumberMatches(CFTypeRef value, uint32_t expected) {
     if (value == NULL || CFGetTypeID(value) != CFNumberGetTypeID()) {
         return false;
@@ -106,7 +128,53 @@ static bool PAVFramebufferMatches(
     CFDictionaryRef product = (CFDictionaryRef)productValue;
     bool matches = PAVStringMatches(CFDictionaryGetValue(product, CFSTR("ManufacturerID")), manufacturer)
         && PAVNumberMatches(CFDictionaryGetValue(product, CFSTR("ProductID")), productID)
-        && PAVStringMatches(CFDictionaryGetValue(product, CFSTR("AlphanumericSerialNumber")), serial);
+        && (serial == NULL
+            || PAVStringMatches(CFDictionaryGetValue(product, CFSTR("AlphanumericSerialNumber")), serial));
+    CFRelease(attributesValue);
+    return matches;
+}
+
+static bool PAVFramebufferMatchesAudioDisplay(
+    io_registry_entry_t framebuffer,
+    const char *outputName,
+    const char *manufacturer,
+    uint32_t *productID,
+    char *serial,
+    uint32_t serialCapacity
+) {
+    CFTypeRef attributesValue = IORegistryEntryCreateCFProperty(
+        framebuffer,
+        CFSTR("DisplayAttributes"),
+        kCFAllocatorDefault,
+        0
+    );
+    if (attributesValue == NULL || CFGetTypeID(attributesValue) != CFDictionaryGetTypeID()) {
+        if (attributesValue != NULL) {
+            CFRelease(attributesValue);
+        }
+        return false;
+    }
+    CFTypeRef productValue = CFDictionaryGetValue((CFDictionaryRef)attributesValue, CFSTR("ProductAttributes"));
+    if (productValue == NULL || CFGetTypeID(productValue) != CFDictionaryGetTypeID()) {
+        CFRelease(attributesValue);
+        return false;
+    }
+    CFDictionaryRef product = (CFDictionaryRef)productValue;
+    CFTypeRef productIDValue = CFDictionaryGetValue(product, CFSTR("ProductID"));
+    uint32_t resolvedProductID = 0;
+    bool matches = PAVStringMatches(CFDictionaryGetValue(product, CFSTR("ManufacturerID")), manufacturer)
+        && PAVOutputNameMatches(CFDictionaryGetValue(product, CFSTR("ProductName")), outputName)
+        && productIDValue != NULL
+        && CFGetTypeID(productIDValue) == CFNumberGetTypeID()
+        && CFNumberGetValue((CFNumberRef)productIDValue, kCFNumberSInt32Type, &resolvedProductID);
+    if (matches) {
+        *productID = resolvedProductID;
+        serial[0] = '\0';
+        CFTypeRef serialValue = CFDictionaryGetValue(product, CFSTR("AlphanumericSerialNumber"));
+        if (serialValue != NULL && CFGetTypeID(serialValue) == CFStringGetTypeID()) {
+            PAVCopyString(serialValue, serial, serialCapacity);
+        }
+    }
     CFRelease(attributesValue);
     return matches;
 }
@@ -174,9 +242,15 @@ static PAVDDCStatus PAVReadVCP(
         if (reply[0] != 0x6E
             || reply[1] != 0x88
             || reply[2] != 0x02
-            || reply[3] != 0x00
             || reply[4] != code
             || PAVChecksum(reply, 10, 0x50) != reply[10]) {
+            receivedMalformedResponse = true;
+            continue;
+        }
+        if (reply[3] == 0x01) {
+            return PAVDDCStatusUnsupported;
+        }
+        if (reply[3] != 0x00) {
             receivedMalformedResponse = true;
             continue;
         }
@@ -224,6 +298,64 @@ static PAVDDCStatus PAVCreateTargetService(
     return status;
 }
 
+PAVDDCStatus PAVDDCResolveAudioDisplay(
+    const char *outputName,
+    const char *manufacturer,
+    uint32_t *productID,
+    char *serial,
+    uint32_t serialCapacity
+) {
+    if (outputName == NULL || manufacturer == NULL || productID == NULL || serial == NULL || serialCapacity == 0) {
+        return PAVDDCStatusMalformedResponse;
+    }
+    io_iterator_t iterator = IO_OBJECT_NULL;
+    kern_return_t iteratorStatus = IORegistryCreateIterator(
+        kIOMainPortDefault,
+        kIOServicePlane,
+        kIORegistryIterateRecursively,
+        &iterator
+    );
+    if (iteratorStatus != KERN_SUCCESS) {
+        return PAVDDCStatusReadFailure;
+    }
+
+    uint32_t matchCount = 0;
+    bool awaitingProxy = false;
+    bool hasAssociatedProxy = false;
+    uint32_t candidateProductID = 0;
+    char candidateSerial[128] = {0};
+    io_registry_entry_t entry = IO_OBJECT_NULL;
+    while ((entry = IOIteratorNext(iterator)) != IO_OBJECT_NULL) {
+        if (IOObjectConformsTo(entry, "AppleCLCD2") || IOObjectConformsTo(entry, "IOMobileFramebufferShim")) {
+            awaitingProxy = PAVFramebufferMatchesAudioDisplay(
+                entry,
+                outputName,
+                manufacturer,
+                &candidateProductID,
+                candidateSerial,
+                sizeof(candidateSerial)
+            );
+            if (awaitingProxy) {
+                matchCount += 1;
+                if (matchCount == 1) {
+                    *productID = candidateProductID;
+                    strncpy(serial, candidateSerial, serialCapacity - 1);
+                    serial[serialCapacity - 1] = '\0';
+                }
+            }
+        } else if (awaitingProxy && PAVIsExternalProxy(entry)) {
+            hasAssociatedProxy = true;
+            awaitingProxy = false;
+        }
+        IOObjectRelease(entry);
+    }
+    IOObjectRelease(iterator);
+    if (matchCount != 1 || !hasAssociatedProxy) {
+        return PAVDDCStatusTargetUnavailable;
+    }
+    return PAVDDCStatusSuccess;
+}
+
 static PAVDDCStatus PAVWriteVCP(
     PAVIOAVFunctions functions,
     IOAVServiceRef service,
@@ -258,7 +390,7 @@ static PAVDDCWriteResult PAVWriteTargetValue(
     uint16_t value
 ) {
     PAVDDCWriteResult result = {PAVDDCStatusTargetUnavailable, 0, 0};
-    if (manufacturer == NULL || serial == NULL) {
+    if (manufacturer == NULL) {
         result.status = PAVDDCStatusMalformedResponse;
         return result;
     }
@@ -301,8 +433,15 @@ PAVDDCReadResult PAVDDCReadTargetState(
     uint32_t productID,
     const char *serial
 ) {
-    PAVDDCReadResult result = {PAVDDCStatusTargetUnavailable, 0, 0, 0, 0};
-    if (manufacturer == NULL || serial == NULL) {
+    PAVDDCReadResult result = {
+        PAVDDCStatusTargetUnavailable,
+        0,
+        0,
+        0,
+        0,
+        PAVDDCStatusTargetUnavailable
+    };
+    if (manufacturer == NULL) {
         result.status = PAVDDCStatusMalformedResponse;
         return result;
     }
@@ -330,7 +469,7 @@ PAVDDCReadResult PAVDDCReadTargetState(
         );
     }
     if (result.status == PAVDDCStatusSuccess) {
-        result.status = PAVReadVCP(
+        result.muteStatus = PAVReadVCP(
             functions,
             service,
             0x8D,

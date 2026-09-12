@@ -1,3 +1,3 @@
 package protocol MonitorStateReading: Sendable {
-    func readState() async throws(MonitorRepositoryError) -> ConfirmedMonitorState?
+    func readState(for target: MonitorIdentity) async throws(MonitorRepositoryError) -> ConfirmedMonitorState?
 }

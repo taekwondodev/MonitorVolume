@@ -1,8 +1,8 @@
 package struct VolumeIntent: Equatable, Sendable {
     package let volume: VolumeLevel
-    package let mute: MuteState
+    package let mute: MonitorMuteState
 
-    package init(volume: VolumeLevel, mute: MuteState) {
+    package init(volume: VolumeLevel, mute: MonitorMuteState) {
         self.volume = volume
         self.mute = mute
     }
@@ -14,9 +14,9 @@ package struct VolumeIntent: Equatable, Sendable {
     package func applying(_ command: MediaKeyCommand) -> Self {
         switch command {
         case let .step(step):
-            Self(volume: volume.adjusting(by: step.points), mute: .unmuted)
+            Self(volume: volume.adjusting(by: step.points), mute: mute.applying(command))
         case .toggleMute:
-            Self(volume: volume, mute: mute.toggled)
+            Self(volume: volume, mute: mute.applying(command))
         }
     }
 }

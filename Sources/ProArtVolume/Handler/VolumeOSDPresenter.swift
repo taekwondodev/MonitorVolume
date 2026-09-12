@@ -20,7 +20,7 @@ final class VolumeOSDPresenter {
         panel?.close()
     }
 
-    func show(_ state: VolumeIntent, boundary: Bool) {
+    func show(_ state: VolumeIntent, displayName: String, boundary: Bool) {
         dismissTask?.cancel()
         pulseTask?.cancel()
         presentationRevision += 1
@@ -28,7 +28,7 @@ final class VolumeOSDPresenter {
         let entering = panel == nil
 
         let panel = panel ?? makePanel()
-        let root = VolumeOSDView(state: state, entered: !entering, pulse: boundary)
+        let root = VolumeOSDView(state: state, displayName: displayName, entered: !entering, pulse: boundary)
         if let hosting = panel.contentView as? NSHostingView<VolumeOSDView> {
             hosting.rootView = root
         } else {

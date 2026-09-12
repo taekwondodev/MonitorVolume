@@ -4,27 +4,60 @@ import Testing
 struct ControlRig {
     let eligibility = ControlEligibility()
     let monitor: IntentTestMonitor
-    let output = IntentTestOutput()
+    let output: IntentTestOutput
     let timer = IntentTestTimer()
     let service: IntentControlService
 
-    init(volume: Int, mute: MuteState = .unmuted) throws {
-        monitor = IntentTestMonitor(state: .init(volume: try #require(VolumeLevel(volume)), mute: mute))
+    init(volume: Int, mute: MonitorMuteState = .unmuted) throws {
+        let target = AudioDisplayTarget.fixture(name: "ASUS PA279CV", productID: 10_088)
+        try self.init(
+            targets: [target: .fixture(volume: volume, mute: mute)],
+            selected: target
+        )
+    }
+
+    init(targets: [AudioDisplayTarget: ConfirmedMonitorState], selected: AudioDisplayTarget) throws {
+        monitor = IntentTestMonitor(states: Dictionary(uniqueKeysWithValues: targets.map { ($0.key.identity, $0.value) }))
+        output = IntentTestOutput(target: selected)
         let timer = timer
-        service = IntentControlService(monitor: monitor, activeOutput: output, eligibility: eligibility,
-                                       sleeper: ControlSleeper { await timer.sleep($0) })
+        service = IntentControlService(
+            monitor: monitor,
+            activeOutput: output,
+            eligibility: eligibility,
+            sleeper: ControlSleeper { await timer.sleep($0) }
+        )
     }
 
     func start() async {
+        await revalidate()
+    }
+
+    func revalidate() async {
         await service.revalidate(generation: eligibility.invalidate(), permitted: true)
         await service.waitForIdle()
     }
 }
 
 actor IntentTestOutput: ActiveAudioOutputReading {
-    private var active = true
-    func setActive(_ value: Bool) { active = value }
-    func isTargetActive() async throws(MonitorRepositoryError) -> Bool { active }
+    private let availableTarget: AudioDisplayTarget?
+    private var target: AudioDisplayTarget?
+
+    init(target: AudioDisplayTarget? = .fixture(name: "ASUS PA279CV", productID: 10_088)) {
+        availableTarget = target
+        self.target = target
+    }
+
+    func setActive(_ value: Bool) {
+        target = value ? availableTarget : nil
+    }
+
+    func select(_ target: AudioDisplayTarget?) {
+        self.target = target
+    }
+
+    func resolveTarget() async throws(MonitorRepositoryError) -> AudioDisplayTarget? {
+        target
+    }
 }
 
 actor IntentTestTimer {
@@ -55,8 +88,18 @@ actor IntentTestTimer {
     }
 }
 
+struct IntentTestVolumeWrite: Equatable, Sendable {
+    let target: MonitorIdentity
+    let value: Int
+}
+
+struct IntentTestMuteWrite: Equatable, Sendable {
+    let target: MonitorIdentity
+    let value: MuteState
+}
+
 actor IntentTestMonitor: MonitorControlling {
-    private var state: ConfirmedMonitorState
+    private var states: [MonitorIdentity: ConfirmedMonitorState]
     private var readable = true
     private var readError: MonitorRepositoryError?
     private var holdRead = false
@@ -69,11 +112,17 @@ actor IntentTestMonitor: MonitorControlling {
     private var started: CheckedContinuation<Void, Never>?
     private var operations = 0
     private(set) var maximumConcurrentOperations = 0
-    private(set) var writtenVolumes: [Int] = []
-    private(set) var writtenMutes: [MuteState] = []
+    private(set) var volumeWrites: [IntentTestVolumeWrite] = []
+    private(set) var muteWrites: [IntentTestMuteWrite] = []
     private(set) var readCount = 0
 
-    init(state: ConfirmedMonitorState) { self.state = state }
+    var writtenVolumes: [Int] { volumeWrites.map(\.value) }
+    var writtenMutes: [MuteState] { muteWrites.map(\.value) }
+
+    init(states: [MonitorIdentity: ConfirmedMonitorState]) {
+        self.states = states
+    }
+
     func setReadable(_ value: Bool) { readable = value }
     func failNextRead(_ error: MonitorRepositoryError) { readError = error }
     func holdNextRead() { holdRead = true }
@@ -94,7 +143,7 @@ actor IntentTestMonitor: MonitorControlling {
 
     private func begin() { operations += 1; maximumConcurrentOperations = max(maximumConcurrentOperations, operations) }
 
-    func readState() async throws(MonitorRepositoryError) -> ConfirmedMonitorState? {
+    func readState(for target: MonitorIdentity) async throws(MonitorRepositoryError) -> ConfirmedMonitorState? {
         begin()
         defer { operations -= 1 }
         readCount += 1
@@ -107,13 +156,16 @@ actor IntentTestMonitor: MonitorControlling {
             }
         }
         if let error = readError { readError = nil; throw error }
-        return readable ? state : nil
+        return readable ? states[target] : nil
     }
 
-    func writeVolume(_ volume: VolumeLevel) async throws(MonitorRepositoryError) -> VolumeLevel {
+    func writeVolume(
+        _ volume: VolumeLevel,
+        for target: MonitorIdentity
+    ) async throws(MonitorRepositoryError) -> VolumeLevel {
         begin()
         defer { operations -= 1 }
-        writtenVolumes.append(volume.rawValue)
+        volumeWrites.append(.init(target: target, value: volume.rawValue))
         if hold {
             hold = false
             await withCheckedContinuation { continuation in
@@ -123,16 +175,21 @@ actor IntentTestMonitor: MonitorControlling {
             }
         }
         if let error = writeError { writeError = nil; throw error }
-        state = .init(volume: volume, mute: state.mute)
+        guard let state = states[target] else { throw .writeFailure }
+        states[target] = .init(volume: volume, mute: state.mute)
         return volume
     }
 
-    func writeMute(_ mute: MuteState) async throws(MonitorRepositoryError) -> MuteState {
+    func writeMute(
+        _ mute: MuteState,
+        for target: MonitorIdentity
+    ) async throws(MonitorRepositoryError) -> MuteState {
         begin()
         defer { operations -= 1 }
-        writtenMutes.append(mute)
+        muteWrites.append(.init(target: target, value: mute))
         if muteFailure { muteFailure = false; throw .writeFailure }
-        state = .init(volume: state.volume, mute: mute)
+        guard let state = states[target] else { throw .writeFailure }
+        states[target] = .init(volume: state.volume, mute: .supported(mute))
         return mute
     }
 }

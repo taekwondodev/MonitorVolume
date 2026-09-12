@@ -2,6 +2,52 @@ import Testing
 @testable import ProArtVolumeCore
 
 struct IntentControlServiceTests {
+    @Test func outputSwitchUsesOnlyTheNewTargetsStateAndRejectsOldGenerationWork() async throws {
+        let rig = try ControlRig(
+            targets: [
+                .fixture(name: "ASUS PA279CV", productID: 10_088): .fixture(volume: 80, mute: .supported(.unmuted)),
+                .fixture(name: "ASUS T16KB", productID: 20_016): .fixture(volume: 70, mute: .unsupported),
+            ],
+            selected: .fixture(name: "ASUS PA279CV", productID: 10_088)
+        )
+        await rig.start()
+        let oldSession = try #require(rig.eligibility.session)
+        var reducer = VolumeIntentReducer()
+        let oldRequest = reducer.accept(.step(.decrease), session: oldSession)
+
+        let t16kb = AudioDisplayTarget.fixture(name: "ASUS T16KB", productID: 20_016)
+        await rig.output.select(t16kb)
+        await rig.revalidate()
+        let t16kbSession = try #require(rig.eligibility.session)
+        #expect(t16kbSession.target.displayName == "ASUS T16KB")
+        #expect(t16kbSession.seed.volume.rawValue == 70)
+        #expect(t16kbSession.seed.mute == .unsupported)
+
+        await rig.service.submit(oldRequest)
+        await rig.service.submit(reducer.accept(.step(.decrease), session: t16kbSession))
+        await rig.service.waitForIdle()
+        #expect(await rig.monitor.volumeWrites == [.init(target: t16kb.identity, value: 65)])
+        #expect(await rig.monitor.writtenMutes.isEmpty)
+
+        await rig.output.select(.fixture(name: "ASUS PA279CV", productID: 10_088))
+        await rig.revalidate()
+        #expect(rig.eligibility.session?.seed.volume.rawValue == 80)
+    }
+
+    @Test func unsupportedMutePreservesVolumeEligibility() async throws {
+        let rig = try ControlRig(volume: 70, mute: .unsupported)
+        await rig.start()
+
+        let session = try #require(rig.eligibility.session)
+        #expect(session.seed.mute == .unsupported)
+        #expect(rig.eligibility.claimTapOwner(generation: session.generation))
+        guard case .consumeKeyDown = rig.eligibility.route(keyDown(.volumeDown)) else {
+            Issue.record("volume must remain eligible after an unsupported mute result")
+            return
+        }
+        #expect(rig.eligibility.route(keyDown(.mute)) == .passThrough)
+    }
+
     @Test func coalescesCompleteStatesWithoutOverlappingHardware() async throws {
         let rig = try ControlRig(volume: 50)
         await rig.start()

@@ -3,6 +3,7 @@ import SwiftUI
 
 struct VolumeOSDView: View {
     let state: VolumeIntent
+    let displayName: String
     var entered = true
     var pulse = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -34,7 +35,7 @@ struct VolumeOSDView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text("ASUS PA279CV")
+                Text(displayName)
                     .font(.headline)
                 Spacer()
                 Text(valueText)
@@ -65,7 +66,7 @@ struct VolumeOSDView: View {
         .animation(.easeOut(duration: 0.12), value: entered)
         .animation(.easeOut(duration: 0.10), value: pulse)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("ASUS PA279CV volume")
+        .accessibilityLabel("\(displayName) volume")
         .accessibilityValue(valueText)
     }
 }

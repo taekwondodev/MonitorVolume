@@ -8,7 +8,8 @@ typedef enum {
     PAVDDCStatusTargetUnavailable = 1,
     PAVDDCStatusReadFailure = 2,
     PAVDDCStatusMalformedResponse = 3,
-    PAVDDCStatusWriteFailure = 4
+    PAVDDCStatusWriteFailure = 4,
+    PAVDDCStatusUnsupported = 5
 } PAVDDCStatus;
 
 typedef struct {
@@ -17,6 +18,7 @@ typedef struct {
     uint16_t volumeMaximum;
     uint16_t muteCurrent;
     uint16_t muteMaximum;
+    PAVDDCStatus muteStatus;
 } PAVDDCReadResult;
 
 typedef struct {
@@ -24,6 +26,14 @@ typedef struct {
     uint16_t current;
     uint16_t maximum;
 } PAVDDCWriteResult;
+
+PAVDDCStatus PAVDDCResolveAudioDisplay(
+    const char *outputName,
+    const char *manufacturer,
+    uint32_t *productID,
+    char *serial,
+    uint32_t serialCapacity
+);
 
 PAVDDCReadResult PAVDDCReadTargetState(
     const char *manufacturer,

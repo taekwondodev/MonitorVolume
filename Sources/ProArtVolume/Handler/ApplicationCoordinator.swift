@@ -271,7 +271,7 @@ final class ApplicationCoordinator: NSObject, NSApplicationDelegate, MediaKeyInt
         let session = delivery.session
         let prior = reducer.startingIntent(for: session)
         let request = reducer.accept(command, session: session)
-        osd.show(request.intent, boundary: request.intent == prior)
+        osd.show(request.intent, displayName: session.target.displayName, boundary: request.intent == prior)
         let service = service
         Task { await service.submit(request) }
     }

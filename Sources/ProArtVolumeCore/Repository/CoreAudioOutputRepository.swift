@@ -1,24 +1,53 @@
 import CoreAudio
 import Dispatch
 import Foundation
+import MonitorTransport
 
 package struct CoreAudioOutputRepository: ActiveAudioOutputReading {
-    private static let targetName = "ASUS PA279CV"
+    package init() {}
 
-    private let identity: MonitorIdentity
-
-    package init(identity: MonitorIdentity) {
-        self.identity = identity
-    }
-
-    package func isTargetActive() async throws(MonitorRepositoryError) -> Bool {
+    package func resolveTarget() async throws(MonitorRepositoryError) -> AudioDisplayTarget? {
         let device = try defaultOutputDevice()
         let name = try stringProperty(kAudioObjectPropertyName, on: device)
         let manufacturer = try stringProperty(kAudioObjectPropertyManufacturer, on: device)
         let transport = try uint32Property(kAudioDevicePropertyTransportType, on: device)
-        return name == Self.targetName
-            && manufacturer == identity.manufacturer
-            && transport == kAudioDeviceTransportTypeDisplayPort
+        guard transport == kAudioDeviceTransportTypeDisplayPort else { return nil }
+        var productID: UInt32 = 0
+        var serial = [CChar](repeating: 0, count: 128)
+        let status = name.withCString { namePointer in
+            manufacturer.withCString { manufacturerPointer in
+                PAVDDCResolveAudioDisplay(
+                    namePointer,
+                    manufacturerPointer,
+                    &productID,
+                    &serial,
+                    UInt32(serial.count)
+                )
+            }
+        }
+        switch status {
+        case PAVDDCStatusSuccess:
+            let serialValue = Self.string(from: serial)
+            return AudioDisplayTarget(
+                identity: MonitorIdentity(
+                    manufacturer: manufacturer,
+                    productID: productID,
+                    serial: serialValue.isEmpty ? nil : serialValue
+                ),
+                displayName: name
+            )
+        case PAVDDCStatusTargetUnavailable:
+            return nil
+        case PAVDDCStatusReadFailure:
+            throw .readFailure
+        default:
+            throw .malformedResponse
+        }
+    }
+
+    private static func string(from buffer: [CChar]) -> String {
+        let bytes = buffer.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }
+        return String(decoding: bytes, as: UTF8.self)
     }
 
     package func observeDefaultOutputChanges(
