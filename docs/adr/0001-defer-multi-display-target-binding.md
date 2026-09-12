@@ -1,6 +1,6 @@
-# ADR 0001: Defer multi-display target binding until hardware is available
+# ADR 0001: Accept verified multi-display target binding
 
-- Status: Deferred
+- Status: Accepted
 - Date: 2026-09-03
 - Tracking issue: [#10](https://github.com/taekwondodev/ProArtVolume/issues/10)
 
@@ -14,13 +14,13 @@ The observed single-display IORegistry topology does not place `DCPAVServiceProx
 
 Active-output detection has a related limit. `CoreAudioOutputRepository` currently matches the default output by configured model name, the manufacturer held by `MonitorIdentity.target`, and DisplayPort transport. Core Audio does not currently bind that device to the stable EDID identity used by the DDC path.
 
-The required multi-display hardware is not currently available for investigation.
+On 2026-09-12, the target PA279CV and a second audio-capable external display were observed together. Core Audio reported the PA279CV as the default output with the configured name, manufacturer, and DisplayPort transport. The IORegistry traversal contained the non-target framebuffer and proxy on `dispext0`, followed by the target framebuffer and proxy on `dispext1`. A read-only probe that reproduced `PAVCreateTargetService` selected the `dispext1` proxy on five consecutive scans. Disconnecting and reconnecting either display recreated the corresponding proxy, preserved the same `dispext0` and `dispext1` association, and produced the same target selection on five scans after each reconnection. Swapping the two external connections recreated both proxies and again preserved the association and target selection on five scans. Sleep and wake also preserved the association and target selection on five scans, kept the PA279CV as the default output, and left the installed signed application running as expected. A reversible Volume Down and Volume Up check after each topology change affected only the PA279CV, confirming the selected proxy end to end. This disproves ambiguity in the observed two-display topology, both individual reconnection cases, the connection-swap case, and sleep and wake. It does not establish behavior for an enumeration order that differs from the one observed on this Mac. The topology probe itself did not open a DDC service or send hardware commands.
 
 ## Decision
 
-Defer the multi-display binding design until the second display is available. Keep the current single-external-display behavior unchanged in the meantime.
+Keep the current traversal behavior unchanged. Accept its residual dependency on IORegistry enumeration order because every topology change exercised on the target Mac preserved the correct association and every end-to-end check controlled only the configured PA279CV.
 
-No multi-display safety architecture is selected by this ADR. In particular, it does not approve traversal-order matching, framebuffer-descendant matching, display-name matching, or ordinal matching as the durable solution.
+Do not add speculative binding logic without a reproduced failure. Reopen the decision if a future topology selects the wrong proxy or cannot select the target unambiguously.
 
 ## Constraints for the future decision
 
@@ -46,4 +46,4 @@ Use a read-only probe first. Exercise reversible writes only after the probe ide
 
 ## Consequences
 
-The current configuration remains supported without speculative transport changes. Multi-display safety remains an explicit unresolved risk until the tracking issue is grilled with real hardware evidence. The future implementation may introduce a fail-closed state or a stronger end-to-end identity, but that choice belongs to the later investigation and grilling session.
+The tested two-external-display configuration selects the expected proxy across every exercised topology change without additional transport code. An unobserved IORegistry enumeration order could still violate the assumed pairing. That risk is accepted for this personal utility and does not justify a speculative implementation.
