@@ -1,0 +1,13 @@
+{
+  "bundle_size_bytes": 674042,
+  "idle_cpu_percent": 0.03470193498668918,
+  "physical_footprint_bytes": 8192600,
+  "provenance": {
+    "architecture": "arm64",
+    "machine_model": "Mac14,9",
+    "os_build": "25F71",
+    "os_version": "26.5"
+  },
+  "schema": 1,
+  "state": "idle"
+}

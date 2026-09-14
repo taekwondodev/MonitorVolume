@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="280" viewBox="0 0 720 280" role="img">
+  <title>Monitor Volume idle measurements</title>
+  <rect width="720" height="280" rx="28" fill="#111111"/>
+  <text x="360" y="48" text-anchor="middle" fill="#F5F5F5" font-family="SF Pro Display, Helvetica Neue, sans-serif" font-size="20">Idle Release app</text>
+  <rect x="36" y="80" width="200" height="160" rx="20" fill="#1C1C1E"/>
+  <text x="136" y="124" text-anchor="middle" fill="#8E8E93" font-family="SF Pro Text, Helvetica Neue, sans-serif" font-size="13">Idle CPU</text>
+  <text x="136" y="172" text-anchor="middle" fill="#7DFFB3" font-family="SF Pro Display, Helvetica Neue, sans-serif" font-size="28">0.035%</text>
+  <rect x="260" y="80" width="200" height="160" rx="20" fill="#1C1C1E"/>
+  <text x="360" y="124" text-anchor="middle" fill="#8E8E93" font-family="SF Pro Text, Helvetica Neue, sans-serif" font-size="13">Physical footprint</text>
+  <text x="360" y="172" text-anchor="middle" fill="#64D2FF" font-family="SF Pro Display, Helvetica Neue, sans-serif" font-size="28">7.81 MiB</text>
+  <rect x="484" y="80" width="200" height="160" rx="20" fill="#1C1C1E"/>
+  <text x="584" y="124" text-anchor="middle" fill="#8E8E93" font-family="SF Pro Text, Helvetica Neue, sans-serif" font-size="13">Installed bundle</text>
+  <text x="584" y="172" text-anchor="middle" fill="#FFD60A" font-family="SF Pro Display, Helvetica Neue, sans-serif" font-size="28">0.64 MiB</text>
+</svg>

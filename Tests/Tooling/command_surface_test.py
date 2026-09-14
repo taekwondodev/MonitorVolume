@@ -39,6 +39,7 @@ class CommandSurfaceTests(unittest.TestCase):
             "check": "scripts/check.sh",
             "build": "scripts/build-app.sh",
             "verify": "scripts/verify-installed-app.sh",
+            "profile": "scripts/profile-app.sh",
             "clean": "swift package clean",
         }
         for target, expected_command in expected_commands.items():

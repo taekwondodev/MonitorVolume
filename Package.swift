@@ -3,12 +3,12 @@
 import PackageDescription
 
 let package = Package(
-    name: "ProArtVolume",
+    name: "MonitorVolume",
     platforms: [
         .macOS(.v15)
     ],
     products: [
-        .executable(name: "ProArtVolume", targets: ["ProArtVolume"])
+        .executable(name: "MonitorVolume", targets: ["MonitorVolume"])
     ],
     targets: [
         .target(
@@ -19,16 +19,16 @@ let package = Package(
             ]
         ),
         .target(
-            name: "ProArtVolumeCore",
+            name: "MonitorVolumeCore",
             dependencies: ["MonitorTransport"]
         ),
         .executableTarget(
-            name: "ProArtVolume",
-            dependencies: ["ProArtVolumeCore"]
+            name: "MonitorVolume",
+            dependencies: ["MonitorVolumeCore"]
         ),
         .testTarget(
-            name: "ProArtVolumeTests",
-            dependencies: ["ProArtVolume", "ProArtVolumeCore"]
+            name: "MonitorVolumeTests",
+            dependencies: ["MonitorVolume", "MonitorVolumeCore"]
         )
     ]
 )

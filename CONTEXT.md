@@ -1,6 +1,6 @@
-# ProArt Volume
+# Monitor Volume
 
-ProArt Volume routes macOS volume input to the external monitor selected as the default audio output while leaving ordinary system volume behavior available for other destinations.
+Monitor Volume routes macOS volume input to the external monitor selected as the default audio output while leaving ordinary system volume behavior available for other destinations.
 
 ## Language
 

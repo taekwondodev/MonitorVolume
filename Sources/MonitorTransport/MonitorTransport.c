@@ -8,15 +8,15 @@
 #include <unistd.h>
 
 typedef CFTypeRef IOAVServiceRef;
-typedef IOAVServiceRef (*PAVCreateServiceFunction)(CFAllocatorRef allocator, io_service_t service);
-typedef IOReturn (*PAVReadI2CFunction)(
+typedef IOAVServiceRef (*MVCreateServiceFunction)(CFAllocatorRef allocator, io_service_t service);
+typedef IOReturn (*MVReadI2CFunction)(
     IOAVServiceRef service,
     uint32_t chipAddress,
     uint32_t offset,
     void *outputBuffer,
     uint32_t outputBufferSize
 );
-typedef IOReturn (*PAVWriteI2CFunction)(
+typedef IOReturn (*MVWriteI2CFunction)(
     IOAVServiceRef service,
     uint32_t chipAddress,
     uint32_t dataAddress,
@@ -26,12 +26,12 @@ typedef IOReturn (*PAVWriteI2CFunction)(
 
 typedef struct {
     void *handle;
-    PAVCreateServiceFunction createService;
-    PAVReadI2CFunction readI2C;
-    PAVWriteI2CFunction writeI2C;
-} PAVIOAVFunctions;
+    MVCreateServiceFunction createService;
+    MVReadI2CFunction readI2C;
+    MVWriteI2CFunction writeI2C;
+} MVIOAVFunctions;
 
-static bool PAVLoadIOAVFunctions(PAVIOAVFunctions *functions) {
+static bool MVLoadIOAVFunctions(MVIOAVFunctions *functions) {
     functions->handle = dlopen(
         "/System/Library/Frameworks/IOKit.framework/Versions/A/IOKit",
         RTLD_LAZY | RTLD_LOCAL
@@ -39,12 +39,12 @@ static bool PAVLoadIOAVFunctions(PAVIOAVFunctions *functions) {
     if (functions->handle == NULL) {
         return false;
     }
-    functions->createService = (PAVCreateServiceFunction)dlsym(
+    functions->createService = (MVCreateServiceFunction)dlsym(
         functions->handle,
         "IOAVServiceCreateWithService"
     );
-    functions->readI2C = (PAVReadI2CFunction)dlsym(functions->handle, "IOAVServiceReadI2C");
-    functions->writeI2C = (PAVWriteI2CFunction)dlsym(functions->handle, "IOAVServiceWriteI2C");
+    functions->readI2C = (MVReadI2CFunction)dlsym(functions->handle, "IOAVServiceReadI2C");
+    functions->writeI2C = (MVWriteI2CFunction)dlsym(functions->handle, "IOAVServiceWriteI2C");
     if (functions->createService == NULL || functions->readI2C == NULL || functions->writeI2C == NULL) {
         dlclose(functions->handle);
         return false;
@@ -52,7 +52,7 @@ static bool PAVLoadIOAVFunctions(PAVIOAVFunctions *functions) {
     return true;
 }
 
-static bool PAVStringMatches(CFTypeRef value, const char *expected) {
+static bool MVStringMatches(CFTypeRef value, const char *expected) {
     if (value == NULL || CFGetTypeID(value) != CFStringGetTypeID()) {
         return false;
     }
@@ -69,16 +69,16 @@ static bool PAVStringMatches(CFTypeRef value, const char *expected) {
     return matches;
 }
 
-static bool PAVCopyString(CFTypeRef value, char *output, uint32_t capacity) {
+static bool MVCopyString(CFTypeRef value, char *output, uint32_t capacity) {
     if (value == NULL || CFGetTypeID(value) != CFStringGetTypeID() || capacity == 0) {
         return false;
     }
     return CFStringGetCString((CFStringRef)value, output, capacity, kCFStringEncodingUTF8);
 }
 
-static bool PAVOutputNameMatches(CFTypeRef productNameValue, const char *outputName) {
+static bool MVOutputNameMatches(CFTypeRef productNameValue, const char *outputName) {
     char productName[128] = {0};
-    if (!PAVCopyString(productNameValue, productName, sizeof(productName))) {
+    if (!MVCopyString(productNameValue, productName, sizeof(productName))) {
         return false;
     }
     if (strcmp(outputName, productName) == 0) {
@@ -91,7 +91,7 @@ static bool PAVOutputNameMatches(CFTypeRef productNameValue, const char *outputN
         && strcmp(outputName + outputLength - productLength, productName) == 0;
 }
 
-static bool PAVNumberMatches(CFTypeRef value, uint32_t expected) {
+static bool MVNumberMatches(CFTypeRef value, uint32_t expected) {
     if (value == NULL || CFGetTypeID(value) != CFNumberGetTypeID()) {
         return false;
     }
@@ -99,7 +99,7 @@ static bool PAVNumberMatches(CFTypeRef value, uint32_t expected) {
     return CFNumberGetValue((CFNumberRef)value, kCFNumberSInt32Type, &actual) && actual == expected;
 }
 
-static bool PAVFramebufferMatches(
+static bool MVFramebufferMatches(
     io_registry_entry_t framebuffer,
     const char *manufacturer,
     uint32_t productID,
@@ -126,15 +126,15 @@ static bool PAVFramebufferMatches(
     }
 
     CFDictionaryRef product = (CFDictionaryRef)productValue;
-    bool matches = PAVStringMatches(CFDictionaryGetValue(product, CFSTR("ManufacturerID")), manufacturer)
-        && PAVNumberMatches(CFDictionaryGetValue(product, CFSTR("ProductID")), productID)
+    bool matches = MVStringMatches(CFDictionaryGetValue(product, CFSTR("ManufacturerID")), manufacturer)
+        && MVNumberMatches(CFDictionaryGetValue(product, CFSTR("ProductID")), productID)
         && (serial == NULL
-            || PAVStringMatches(CFDictionaryGetValue(product, CFSTR("AlphanumericSerialNumber")), serial));
+            || MVStringMatches(CFDictionaryGetValue(product, CFSTR("AlphanumericSerialNumber")), serial));
     CFRelease(attributesValue);
     return matches;
 }
 
-static bool PAVFramebufferMatchesAudioDisplay(
+static bool MVFramebufferMatchesAudioDisplay(
     io_registry_entry_t framebuffer,
     const char *outputName,
     const char *manufacturer,
@@ -162,8 +162,8 @@ static bool PAVFramebufferMatchesAudioDisplay(
     CFDictionaryRef product = (CFDictionaryRef)productValue;
     CFTypeRef productIDValue = CFDictionaryGetValue(product, CFSTR("ProductID"));
     uint32_t resolvedProductID = 0;
-    bool matches = PAVStringMatches(CFDictionaryGetValue(product, CFSTR("ManufacturerID")), manufacturer)
-        && PAVOutputNameMatches(CFDictionaryGetValue(product, CFSTR("ProductName")), outputName)
+    bool matches = MVStringMatches(CFDictionaryGetValue(product, CFSTR("ManufacturerID")), manufacturer)
+        && MVOutputNameMatches(CFDictionaryGetValue(product, CFSTR("ProductName")), outputName)
         && productIDValue != NULL
         && CFGetTypeID(productIDValue) == CFNumberGetTypeID()
         && CFNumberGetValue((CFNumberRef)productIDValue, kCFNumberSInt32Type, &resolvedProductID);
@@ -172,14 +172,14 @@ static bool PAVFramebufferMatchesAudioDisplay(
         serial[0] = '\0';
         CFTypeRef serialValue = CFDictionaryGetValue(product, CFSTR("AlphanumericSerialNumber"));
         if (serialValue != NULL && CFGetTypeID(serialValue) == CFStringGetTypeID()) {
-            PAVCopyString(serialValue, serial, serialCapacity);
+            MVCopyString(serialValue, serial, serialCapacity);
         }
     }
     CFRelease(attributesValue);
     return matches;
 }
 
-static bool PAVIsExternalProxy(io_registry_entry_t entry) {
+static bool MVIsExternalProxy(io_registry_entry_t entry) {
     if (!IOObjectConformsTo(entry, "DCPAVServiceProxy")) {
         return false;
     }
@@ -189,14 +189,14 @@ static bool PAVIsExternalProxy(io_registry_entry_t entry) {
         kCFAllocatorDefault,
         0
     );
-    bool external = PAVStringMatches(location, "External");
+    bool external = MVStringMatches(location, "External");
     if (location != NULL) {
         CFRelease(location);
     }
     return external;
 }
 
-static uint8_t PAVChecksum(const uint8_t *bytes, uint32_t count, uint8_t initial) {
+static uint8_t MVChecksum(const uint8_t *bytes, uint32_t count, uint8_t initial) {
     uint8_t checksum = initial;
     for (uint32_t index = 0; index < count; index += 1) {
         checksum ^= bytes[index];
@@ -204,24 +204,24 @@ static uint8_t PAVChecksum(const uint8_t *bytes, uint32_t count, uint8_t initial
     return checksum;
 }
 
-static PAVDDCStatus PAVReadVCP(
-    PAVIOAVFunctions functions,
+static MVDDCStatus MVReadVCP(
+    MVIOAVFunctions functions,
     IOAVServiceRef service,
     uint8_t code,
     uint16_t *current,
     uint16_t *maximum
 ) {
     uint8_t request[] = {0x82, 0x01, code, 0x00};
-    request[3] = PAVChecksum(request, 3, 0x6E);
+    request[3] = MVChecksum(request, 3, 0x6E);
 
     IOReturn writeStatus = functions.writeI2C(service, 0x37, 0x51, request, sizeof(request));
     if (writeStatus != kIOReturnSuccess) {
-        return PAVDDCStatusReadFailure;
+        return MVDDCStatusReadFailure;
     }
     usleep(10000);
     writeStatus = functions.writeI2C(service, 0x37, 0x51, request, sizeof(request));
     if (writeStatus != kIOReturnSuccess) {
-        return PAVDDCStatusReadFailure;
+        return MVDDCStatusReadFailure;
     }
 
     bool receivedMalformedResponse = false;
@@ -243,12 +243,12 @@ static PAVDDCStatus PAVReadVCP(
             || reply[1] != 0x88
             || reply[2] != 0x02
             || reply[4] != code
-            || PAVChecksum(reply, 10, 0x50) != reply[10]) {
+            || MVChecksum(reply, 10, 0x50) != reply[10]) {
             receivedMalformedResponse = true;
             continue;
         }
         if (reply[3] == 0x01) {
-            return PAVDDCStatusUnsupported;
+            return MVDDCStatusUnsupported;
         }
         if (reply[3] != 0x00) {
             receivedMalformedResponse = true;
@@ -256,13 +256,13 @@ static PAVDDCStatus PAVReadVCP(
         }
         *maximum = (uint16_t)((reply[6] << 8) | reply[7]);
         *current = (uint16_t)((reply[8] << 8) | reply[9]);
-        return PAVDDCStatusSuccess;
+        return MVDDCStatusSuccess;
     }
-    return receivedMalformedResponse ? PAVDDCStatusMalformedResponse : PAVDDCStatusReadFailure;
+    return receivedMalformedResponse ? MVDDCStatusMalformedResponse : MVDDCStatusReadFailure;
 }
 
-static PAVDDCStatus PAVCreateTargetService(
-    PAVIOAVFunctions functions,
+static MVDDCStatus MVCreateTargetService(
+    MVIOAVFunctions functions,
     const char *manufacturer,
     uint32_t productID,
     const char *serial,
@@ -276,18 +276,18 @@ static PAVDDCStatus PAVCreateTargetService(
         &iterator
     );
     if (iteratorStatus != KERN_SUCCESS) {
-        return PAVDDCStatusReadFailure;
+        return MVDDCStatusReadFailure;
     }
 
-    PAVDDCStatus status = PAVDDCStatusTargetUnavailable;
+    MVDDCStatus status = MVDDCStatusTargetUnavailable;
     bool targetFramebuffer = false;
     io_registry_entry_t entry = IO_OBJECT_NULL;
     while ((entry = IOIteratorNext(iterator)) != IO_OBJECT_NULL) {
         if (IOObjectConformsTo(entry, "AppleCLCD2") || IOObjectConformsTo(entry, "IOMobileFramebufferShim")) {
-            targetFramebuffer = PAVFramebufferMatches(entry, manufacturer, productID, serial);
-        } else if (targetFramebuffer && PAVIsExternalProxy(entry)) {
+            targetFramebuffer = MVFramebufferMatches(entry, manufacturer, productID, serial);
+        } else if (targetFramebuffer && MVIsExternalProxy(entry)) {
             *targetService = functions.createService(kCFAllocatorDefault, entry);
-            status = *targetService == NULL ? PAVDDCStatusReadFailure : PAVDDCStatusSuccess;
+            status = *targetService == NULL ? MVDDCStatusReadFailure : MVDDCStatusSuccess;
             IOObjectRelease(entry);
             break;
         }
@@ -298,7 +298,7 @@ static PAVDDCStatus PAVCreateTargetService(
     return status;
 }
 
-PAVDDCStatus PAVDDCResolveAudioDisplay(
+MVDDCStatus MVDDCResolveAudioDisplay(
     const char *outputName,
     const char *manufacturer,
     uint32_t *productID,
@@ -306,7 +306,7 @@ PAVDDCStatus PAVDDCResolveAudioDisplay(
     uint32_t serialCapacity
 ) {
     if (outputName == NULL || manufacturer == NULL || productID == NULL || serial == NULL || serialCapacity == 0) {
-        return PAVDDCStatusMalformedResponse;
+        return MVDDCStatusMalformedResponse;
     }
     io_iterator_t iterator = IO_OBJECT_NULL;
     kern_return_t iteratorStatus = IORegistryCreateIterator(
@@ -316,7 +316,7 @@ PAVDDCStatus PAVDDCResolveAudioDisplay(
         &iterator
     );
     if (iteratorStatus != KERN_SUCCESS) {
-        return PAVDDCStatusReadFailure;
+        return MVDDCStatusReadFailure;
     }
 
     uint32_t matchCount = 0;
@@ -327,7 +327,7 @@ PAVDDCStatus PAVDDCResolveAudioDisplay(
     io_registry_entry_t entry = IO_OBJECT_NULL;
     while ((entry = IOIteratorNext(iterator)) != IO_OBJECT_NULL) {
         if (IOObjectConformsTo(entry, "AppleCLCD2") || IOObjectConformsTo(entry, "IOMobileFramebufferShim")) {
-            awaitingProxy = PAVFramebufferMatchesAudioDisplay(
+            awaitingProxy = MVFramebufferMatchesAudioDisplay(
                 entry,
                 outputName,
                 manufacturer,
@@ -343,7 +343,7 @@ PAVDDCStatus PAVDDCResolveAudioDisplay(
                     serial[serialCapacity - 1] = '\0';
                 }
             }
-        } else if (awaitingProxy && PAVIsExternalProxy(entry)) {
+        } else if (awaitingProxy && MVIsExternalProxy(entry)) {
             hasAssociatedProxy = true;
             awaitingProxy = false;
         }
@@ -351,13 +351,13 @@ PAVDDCStatus PAVDDCResolveAudioDisplay(
     }
     IOObjectRelease(iterator);
     if (matchCount != 1 || !hasAssociatedProxy) {
-        return PAVDDCStatusTargetUnavailable;
+        return MVDDCStatusTargetUnavailable;
     }
-    return PAVDDCStatusSuccess;
+    return MVDDCStatusSuccess;
 }
 
-static PAVDDCStatus PAVWriteVCP(
-    PAVIOAVFunctions functions,
+static MVDDCStatus MVWriteVCP(
+    MVIOAVFunctions functions,
     IOAVServiceRef service,
     uint8_t code,
     uint16_t value
@@ -370,7 +370,7 @@ static PAVDDCStatus PAVWriteVCP(
         (uint8_t)(value & 0xFF),
         0x00
     };
-    request[5] = PAVChecksum(request, 5, 0x6E ^ 0x51);
+    request[5] = MVChecksum(request, 5, 0x6E ^ 0x51);
     bool wrote = false;
     for (uint32_t attempt = 0; attempt < 2; attempt += 1) {
         usleep(50000);
@@ -379,41 +379,41 @@ static PAVDDCStatus PAVWriteVCP(
             wrote = true;
         }
     }
-    return wrote ? PAVDDCStatusSuccess : PAVDDCStatusWriteFailure;
+    return wrote ? MVDDCStatusSuccess : MVDDCStatusWriteFailure;
 }
 
-static PAVDDCWriteResult PAVWriteTargetValue(
+static MVDDCWriteResult MVWriteTargetValue(
     const char *manufacturer,
     uint32_t productID,
     const char *serial,
     uint8_t code,
     uint16_t value
 ) {
-    PAVDDCWriteResult result = {PAVDDCStatusTargetUnavailable, 0, 0};
+    MVDDCWriteResult result = {MVDDCStatusTargetUnavailable, 0, 0};
     if (manufacturer == NULL) {
-        result.status = PAVDDCStatusMalformedResponse;
+        result.status = MVDDCStatusMalformedResponse;
         return result;
     }
-    PAVIOAVFunctions functions = {0};
-    if (!PAVLoadIOAVFunctions(&functions)) {
-        result.status = PAVDDCStatusReadFailure;
+    MVIOAVFunctions functions = {0};
+    if (!MVLoadIOAVFunctions(&functions)) {
+        result.status = MVDDCStatusReadFailure;
         return result;
     }
 
     IOAVServiceRef service = NULL;
-    result.status = PAVCreateTargetService(
+    result.status = MVCreateTargetService(
         functions,
         manufacturer,
         productID,
         serial,
         &service
     );
-    if (result.status == PAVDDCStatusSuccess) {
-        result.status = PAVWriteVCP(functions, service, code, value);
+    if (result.status == MVDDCStatusSuccess) {
+        result.status = MVWriteVCP(functions, service, code, value);
     }
-    if (result.status == PAVDDCStatusSuccess) {
+    if (result.status == MVDDCStatusSuccess) {
         usleep(250000);
-        result.status = PAVReadVCP(
+        result.status = MVReadVCP(
             functions,
             service,
             code,
@@ -428,39 +428,39 @@ static PAVDDCWriteResult PAVWriteTargetValue(
     return result;
 }
 
-PAVDDCReadResult PAVDDCReadTargetState(
+MVDDCReadResult MVDDCReadTargetState(
     const char *manufacturer,
     uint32_t productID,
     const char *serial
 ) {
-    PAVDDCReadResult result = {
-        PAVDDCStatusTargetUnavailable,
+    MVDDCReadResult result = {
+        MVDDCStatusTargetUnavailable,
         0,
         0,
         0,
         0,
-        PAVDDCStatusTargetUnavailable
+        MVDDCStatusTargetUnavailable
     };
     if (manufacturer == NULL) {
-        result.status = PAVDDCStatusMalformedResponse;
+        result.status = MVDDCStatusMalformedResponse;
         return result;
     }
-    PAVIOAVFunctions functions = {0};
-    if (!PAVLoadIOAVFunctions(&functions)) {
-        result.status = PAVDDCStatusReadFailure;
+    MVIOAVFunctions functions = {0};
+    if (!MVLoadIOAVFunctions(&functions)) {
+        result.status = MVDDCStatusReadFailure;
         return result;
     }
 
     IOAVServiceRef service = NULL;
-    result.status = PAVCreateTargetService(
+    result.status = MVCreateTargetService(
         functions,
         manufacturer,
         productID,
         serial,
         &service
     );
-    if (result.status == PAVDDCStatusSuccess) {
-        result.status = PAVReadVCP(
+    if (result.status == MVDDCStatusSuccess) {
+        result.status = MVReadVCP(
             functions,
             service,
             0x62,
@@ -468,8 +468,8 @@ PAVDDCReadResult PAVDDCReadTargetState(
             &result.volumeMaximum
         );
     }
-    if (result.status == PAVDDCStatusSuccess) {
-        result.muteStatus = PAVReadVCP(
+    if (result.status == MVDDCStatusSuccess) {
+        result.muteStatus = MVReadVCP(
             functions,
             service,
             0x8D,
@@ -484,20 +484,20 @@ PAVDDCReadResult PAVDDCReadTargetState(
     return result;
 }
 
-PAVDDCWriteResult PAVDDCWriteTargetVolume(
+MVDDCWriteResult MVDDCWriteTargetVolume(
     const char *manufacturer,
     uint32_t productID,
     const char *serial,
     uint16_t volume
 ) {
-    return PAVWriteTargetValue(manufacturer, productID, serial, 0x62, volume);
+    return MVWriteTargetValue(manufacturer, productID, serial, 0x62, volume);
 }
 
-PAVDDCWriteResult PAVDDCWriteTargetMute(
+MVDDCWriteResult MVDDCWriteTargetMute(
     const char *manufacturer,
     uint32_t productID,
     const char *serial,
     uint16_t mute
 ) {
-    return PAVWriteTargetValue(manufacturer, productID, serial, 0x8D, mute);
+    return MVWriteTargetValue(manufacturer, productID, serial, 0x8D, mute);
 }
