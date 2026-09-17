@@ -9,11 +9,11 @@ final class ApplicationCoordinator: NSObject, NSApplicationDelegate, MediaKeyInt
     private let output: CoreAudioOutputRepository
     private let interceptor: MediaKeyInterceptor
     private let osd: VolumeOSDPresenter
+    private let permissionSession: AccessibilityPermissionSession
     private let diagnostics: InputLifecycleDiagnostics?
     private var reducer = VolumeIntentReducer()
     private var permissionTask: Task<Void, Never>?
     private var permissionPollingGeneration: UInt64 = 0
-    private var permissionGrantWatch: Task<Void, Never>?
     private var outputObservation: ActiveAudioOutputObservation?
     private var sleeping = false
     private var stopped = false
@@ -27,14 +27,25 @@ final class ApplicationCoordinator: NSObject, NSApplicationDelegate, MediaKeyInt
         self.diagnostics = diagnostics
         interceptor = MediaKeyInterceptor(eligibility: eligibility, diagnostics: diagnostics)
         osd = VolumeOSDPresenter()
+        let settings = SystemSettingsAccessibilityController()
+        permissionSession = AccessibilityPermissionSession(
+            applicationURL: Bundle.main.bundleURL,
+            trust: interceptor,
+            settings: settings,
+            overlay: AccessibilityPermissionOverlayPanel(settings: settings)
+        ) { _ in }
         super.init()
         interceptor.delegate = self
+        permissionSession.setGrantHandler { [weak self] generation in
+            self?.permissionGranted(generation: generation)
+        }
     }
 
     isolated deinit {
         stopped = true
         reopenAfterTapRelease = false
         stopPermissionPolling()
+        permissionSession.end(.deinitialization)
         interceptor.stop(reason: .deinitialization)
         NotificationCenter.default.removeObserver(self)
         NSWorkspace.shared.notificationCenter.removeObserver(self)
@@ -71,7 +82,7 @@ final class ApplicationCoordinator: NSObject, NSApplicationDelegate, MediaKeyInt
         stopped = true
         reopenAfterTapRelease = false
         stopPermissionPolling()
-        stopWatchingForPermissionGrant()
+        permissionSession.end(.termination)
         outputObservation = nil
         let generation = eligibility.invalidate()
         interceptor.stop(reason: .termination)
@@ -89,7 +100,6 @@ final class ApplicationCoordinator: NSObject, NSApplicationDelegate, MediaKeyInt
         }
         reopenAfterTapRelease = false
         diagnostics?.record(.lifecycle(.reopen, generation: generation))
-        interceptor.requestPermissions()
         guard interceptor.open(generation: generation, permissionFailure: .missingPermission) else { return }
         startPermissionPolling()
         scheduleServiceValidation(generation: generation, reason: .reopen, permitted: true)
@@ -145,29 +155,14 @@ final class ApplicationCoordinator: NSObject, NSApplicationDelegate, MediaKeyInt
         permissionTask = nil
     }
 
-    private func watchForPermissionGrant() {
-        guard permissionGrantWatch == nil, eligibility.awaitsPermission else { return }
-        permissionGrantWatch = Task { @MainActor [weak self] in
-            defer { self?.permissionGrantWatch = nil }
-            while !Task.isCancelled {
-                do {
-                    try await Task.sleep(for: .seconds(1))
-                } catch {
-                    return
-                }
-                guard let self, !self.stopped, !self.sleeping else { return }
-                guard self.eligibility.awaitsPermission else { return }
-                guard self.interceptor.hasAccessibility else { continue }
-                self.diagnostics?.record(.lifecycle(.permissionGranted, generation: self.eligibility.generation))
-                self.reopen()
-                return
-            }
+    private func permissionGranted(generation: UInt64) {
+        guard !stopped, !sleeping,
+              eligibility.generation == generation,
+              eligibility.awaitsPermission else {
+            return
         }
-    }
-
-    private func stopWatchingForPermissionGrant() {
-        permissionGrantWatch?.cancel()
-        permissionGrantWatch = nil
+        diagnostics?.record(.lifecycle(.permissionGranted, generation: generation))
+        reopen()
     }
 
     private func revalidateHardware(reason: InputLifecycleReason) {
@@ -213,7 +208,7 @@ final class ApplicationCoordinator: NSObject, NSApplicationDelegate, MediaKeyInt
         guard !stopped, !sleeping else { return }
         sleeping = true
         stopPermissionPolling()
-        stopWatchingForPermissionGrant()
+        permissionSession.end(.sleep)
         let generation = eligibility.sleep()
         diagnostics?.record(.lifecycle(.sleep, generation: generation))
         interceptor.stop(reason: .sleep)
@@ -238,7 +233,7 @@ final class ApplicationCoordinator: NSObject, NSApplicationDelegate, MediaKeyInt
                 reopenAfterTapRelease = false
                 reopen()
             }
-            watchForPermissionGrant()
+            permissionSession.beginSilent(for: eligibility.generation)
         case .remainsUnavailable:
             stopPermissionPolling()
             diagnostics?.record(.lifecycle(.wake, generation: eligibility.generation))
@@ -257,7 +252,15 @@ final class ApplicationCoordinator: NSObject, NSApplicationDelegate, MediaKeyInt
         diagnostics?.record(.revalidation(.requested, lifecycleReason, generation: generation))
         interceptor.stop(reason: lifecycleReason)
         scheduleServiceValidation(generation: generation, reason: lifecycleReason, permitted: false)
-        watchForPermissionGrant()
+        if reason == .missingPermission {
+            if permissionSession.beginGuided(for: generation) == .alreadyGranted {
+                permissionGranted(generation: generation)
+            }
+        } else if reason == .permissionRevoked {
+            permissionSession.beginSilent(for: generation)
+        } else {
+            permissionSession.end(.superseded)
+        }
     }
 
     func mediaKeyInterceptorDidReleaseTap(_ interceptor: MediaKeyInterceptor) {

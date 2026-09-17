@@ -20,7 +20,7 @@ enum InputLifecycleReason: String, Sendable {
 
 enum InputLifecycleOperation: String, Sendable {
     case permissionPoll, stop, tapCreate, sourceCreate, sourceAdd, tapEnable
-    case sourceRemove, tapInvalidate, permissionPrompt
+    case sourceRemove, tapInvalidate
 }
 
 enum InputLifecycleQuery: String, Sendable {

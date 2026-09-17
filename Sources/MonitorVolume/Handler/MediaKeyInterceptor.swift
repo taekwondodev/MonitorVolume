@@ -30,7 +30,7 @@ protocol MediaKeyInterceptorDelegate: AnyObject {
 }
 
 @MainActor
-final class MediaKeyInterceptor {
+final class MediaKeyInterceptor: AccessibilityTrustChecking {
     weak var delegate: (any MediaKeyInterceptorDelegate)?
 
     private let eligibility: ControlEligibility
@@ -49,6 +49,8 @@ final class MediaKeyInterceptor {
         diagnostics?.endQuery(query, value: trusted)
         return trusted
     }
+
+    var isGranted: Bool { hasAccessibility }
 
     init(eligibility: ControlEligibility, diagnostics: InputLifecycleDiagnostics?) {
         self.eligibility = eligibility
@@ -118,13 +120,6 @@ final class MediaKeyInterceptor {
         return true
     }
 
-    func requestPermissions() {
-        if !hasAccessibility {
-            let operation = diagnostics?.begin(.permissionPrompt, tap: diagnosticTap, reason: .reopen)
-            _ = AXIsProcessTrustedWithOptions(["AXTrustedCheckOptionPrompt": true] as CFDictionary)
-            diagnostics?.end(operation)
-        }
-    }
 
     func stop(reason: InputLifecycleReason) {
         let ownerWasActive = eligibility.snapshot.tapOwnerActive
