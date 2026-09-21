@@ -166,14 +166,18 @@ def build_release() -> Path:
     return executable
 
 
-def signing_identity() -> str:
-    result = run(["security", "find-identity", "-v", "-p", "codesigning"])
-    identities = [line for line in result.stdout.splitlines() if "Apple Development" in line]
+def select_signing_identity(output: str) -> str:
+    identities = [line for line in output.splitlines() if "Apple Development" in line]
     if len(identities) > 1:
         raise RuntimeError("More than one Apple Development identity is installed; keep exactly one")
     if not identities:
-        raise RuntimeError("No Apple Development signing identity is installed (Xcode > Settings > Accounts > Manage Certificates)")
+        return "-"
     return identities[0].split('"')[1]
+
+
+def signing_identity() -> str:
+    result = run(["security", "find-identity", "-v", "-p", "codesigning"])
+    return select_signing_identity(result.stdout)
 
 
 ICON_POINT_SIZES = (16, 32, 128, 256, 512)

@@ -63,6 +63,6 @@ This is platform behavior for any process holding an event tap on macOS 26, and 
 
 ## Consequences
 
-- The bundle is signed with the Apple Development identity, so the Accessibility grant survives rebuilds (fact 7). The build fails when no identity is installed instead of falling back to ad-hoc.
+- The bundle uses the Apple Development identity when one is available, so the Accessibility grant survives rebuilds (fact 7). When no Apple Development identity is installed, the build falls back to ad-hoc signing so public GitHub checkouts remain buildable; those builds may require the Accessibility grant again after replacement.
 - Recovery after a live revocation requires a new process (fact 9): quit and relaunch the app, then grant the permission; the app picks it up on its own.
 - The measurement campaign, offline harness, latency instrumentation, hardware proof probe, and `verify-*` project skill are removed. The command surface is `test`, `check`, `build`, `verify`, `clean`.

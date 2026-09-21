@@ -6,7 +6,7 @@ Use the repository command surface:
 
 - `make test` runs the Swift test suite.
 - `make check` runs the strict-concurrency Release build and tooling checks.
-- `make build` builds, signs with the Apple Development identity, installs, and launches `~/Applications/Monitor Volume.app`. The Accessibility grant survives rebuilds because the signing identity is stable. The first build after an identifier change requires the grant again.
+- `make build` builds, signs with an Apple Development identity when available (otherwise ad hoc), installs, and launches `~/Applications/Monitor Volume.app`. The Accessibility grant survives rebuilds with the stable Apple Development identity; ad hoc builds may require it again after each rebuild. The first build after an identifier change requires the grant again.
 - `make verify` verifies the installed bundle and exact live process.
 - `make profile` measures the installed Release app at idle and regenerates the committed chart.
 - `make clean` removes only SwiftPM build artifacts.

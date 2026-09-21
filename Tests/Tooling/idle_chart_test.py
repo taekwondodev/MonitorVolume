@@ -14,6 +14,15 @@ import app_tool  # noqa: E402
 
 
 class IdleChartTests(unittest.TestCase):
+    def test_signing_falls_back_to_ad_hoc_without_apple_development_identity(self) -> None:
+        self.assertEqual(app_tool.select_signing_identity("    0 valid identities found"), "-")
+        self.assertEqual(
+            app_tool.select_signing_identity(
+                '  1) ABCDEF "Apple Development: developer@example.com (TEAMID)"'
+            ),
+            "Apple Development: developer@example.com (TEAMID)",
+        )
+
     def test_fixture_baseline_renders_paired_cpu_and_fails_when_missing(self) -> None:
         samples = [
             {"cpu_s": 0.0, "wall_s": 10.0},
