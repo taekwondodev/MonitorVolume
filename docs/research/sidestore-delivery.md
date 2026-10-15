@@ -55,3 +55,27 @@ The current `Makefile` commands are Mac-focused: `make build` builds, signs, ins
 - SideStore README, current `develop` branch: https://github.com/SideStore/SideStore/blob/develop/README.md (retrieved 2026-10-15). The source says SideStore uses a personal development certificate and periodically refreshes apps; it does not answer all five detailed questions.
 - Related repository evidence: `docs/research/ios-companion-build-and-signing.md` on branch `research/ios-companion-build-and-signing`; local `Makefile:1-32` and `README.md:27-33`.
 - AltStore/AltSign source, exact source revision, and detailed entitlement/capability handling were not inspected. Numeric limits and persistence claims are intentionally left unresolved rather than inferred from community reports or from Apple's Personal Team limits.
+
+## Coordinator verification
+
+Sources checked by the coordinator on 2026-10-15: the SideStore FAQ (https://docs.sidestore.io/docs/faq), the AltStore App IDs page (https://faq.altstore.io/altstore-classic/app-ids), the AltStore source format (https://faq.altstore.io/developers/make-a-source), and SideStore source at commit `12ff39c6b6c0ccd8180f0834a893a4bbaf7bcd31` (develop, 2026-10-13). These resolve most of the gaps above.
+
+**Facts.**
+
+- Limits: with a free Apple Account, SideStore installs at most 3 apps at a time including itself, and at most 10 App IDs per week (SideStore FAQ). Every app extension needs its own App ID, and each App ID expires after one week (AltStore App IDs page; SideStore is an AltStore fork per its FAQ). A companion with one widget or control extension therefore costs 2 App IDs and 1 active app slot.
+- Developer changes: "Your apps shouldn't need any modification to work with SideStore" (SideStore FAQ).
+- Bundle identifier rewrite: for a new install, the App ID registered is `<bundle identifier>.<team identifier>` (https://github.com/SideStore/SideStore/blob/12ff39c6b6c0ccd8180f0834a893a4bbaf7bcd31/SideStore/Core/Operations/PipelineOperations/FetchProvisioningProfilesOperation.swift#L147-L150); an already installed app keeps its previous resigned identifier when the team matches (same file, L118-L136). Extension identifiers are rewritten by replacing the parent prefix (same file, L42, L76), and extension identifiers must start with the parent identifier plus a dot (same file, L157-L158). The new identifier is written into `CFBundleIdentifier` in each bundle's Info.plist (https://github.com/SideStore/SideStore/blob/12ff39c6b6c0ccd8180f0834a893a4bbaf7bcd31/SideStore/Core/Operations/PipelineOperations/ResignAppOperation.swift#L132-L133).
+- App Groups rewrite: requested groups are registered with the team identifier appended, `<group>.<team identifier>` (FetchProvisioningProfilesOperation.swift L409, L451). Code that hardcodes the original group identifier will not find the signed group.
+- Info.plist handling: the resign step rewrites `CFBundleIdentifier`, background task identifiers, URL schemes, exported UTIs, and file provider groups, and removes `DTXcode` keys (ResignAppOperation.swift L85-L178). It does not touch `NSLocalNetworkUsageDescription` or `NSBonjourServices`.
+- Data persistence: installing the same or an updated IPA over an existing app keeps its data intact (SideStore FAQ, "Can I transfer my AltStore/Sideloadly apps?"). Because the resigned identifier and team stay stable across refresh (FetchProvisioningProfilesOperation.swift L118-L136), the app's default Keychain access group stays stable as well.
+- Source distribution: a source is a self-hosted JSON file listing apps by bundle identifier with downloadable versions (AltStore "Make a Source"). It is optional; direct IPA installation needs no source.
+
+**Inferences.**
+
+- Pairing secrets kept in the app's default Keychain access group should survive the 7-day refresh and updated installs. Sharing them with an extension needs an App Group or Keychain sharing entitlement whose identifier must be read at runtime, because SideStore appends the team identifier.
+- With SideStore occupying one of the three slots, the companion uses a second slot, leaving one for any other sideloaded app the requester uses. Each extension adds weekly App ID pressure.
+
+**Hypotheses still open.**
+
+- SideStore accepts an IPA built with `CODE_SIGNING_ALLOWED=NO` and packaged as `Payload/<App>.app` in a zip. The import pipeline re-signs everything, but no local build was attempted; verify during implementation with the first `make ios-ipa` artifact.
+- The iOS Local Network grant survives refresh and updates. No source states it; iOS keys privacy grants per app, and the bundle identifier is stable, but this needs a device observation.
