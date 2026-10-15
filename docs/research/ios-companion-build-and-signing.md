@@ -48,3 +48,9 @@ This proves an Apple Development identity is installed. It does not establish wh
 - The Apple account's membership status/team role was not directly inspected, and no provisioning profile exists locally to reveal a TeamIdentifier, profile type, or expiry. Check Xcode Accounts / Developer portal with the account owner.
 - No iOS project, simulator build, provisioning operation or physical installation was attempted. The command syntax is verified from local help, not an end-to-end install.
 - The recommendation assumes the shared model can be separated without exposing monitor-specific state to iOS. The phone's required one-way command-only behavior remains as given scope; no state-return channel is proposed here.
+
+## Coordinator verification
+
+- Confirmed `package` access on `MediaKey`, `MediaKeyCommand`, `MediaKeyPhase`, and `MediaKeyEvent` (Sources/MonitorVolumeCore/Domain/MediaKey.swift:1-32) and the Makefile mappings (Makefile:16-32).
+- The provisioning search above missed the current Xcode location. `~/Library/Developer/Xcode/UserData/Provisioning Profiles` does not exist either, so no profile is installed locally.
+- Xcode's cached team metadata conflicts for the same team `6STK5CF75S`. `defaults read com.apple.dt.Xcode IDEProvisioningTeamByIdentifier` reports `teamType = "Personal Team"` and `isFreeProvisioningTeam = 1`; the legacy key `IDEProvisioningTeams` reports `teamType = Individual` and `isFreeProvisioningTeam = 0`. Paid membership therefore remains unconfirmed; the requester can confirm it at https://developer.apple.com/account.
