@@ -81,3 +81,13 @@ Core Bluetooth supports BLE central/peripheral communications and exposes charac
 - macOS firewall guide: https://support.apple.com/guide/mac-help/block-connections-to-your-mac-with-a-firewall-mh34041/mac
 - Bonjour overview archive: https://developer.apple.com/library/archive/documentation/Cocoa/Conceptual/NetServices/Introduction.html
 - Mac sleep settings: https://support.apple.com/guide/mac-help/set-sleep-and-wake-settings-mchle41a6ccd/mac
+
+## Coordinator verification
+
+Checked against TN3179 (https://developer.apple.com/documentation/technotes/tn3179-understanding-local-network-privacy, revision 2026-10-06):
+
+- Confirmed: macOS local network privacy since macOS 15; listening for and accepting incoming TCP needs no Local Network access, while registering, browsing, and resolving Bonjour services do; an iOS app in the background with an undetermined privilege is denied without an alert.
+- Correction to section 4: "In general, app extensions share the Local Network privilege state of their container app." Background extensions are denied only while the privilege is undetermined. After the user grants it in the foreground app, a widget or control extension is not blocked by local network privacy. Whether a given surface runs long enough to complete the connection remains a device test.
+- Addition: local network privacy tracks a macOS program by its code signature, and Apple advises signing with an Apple-issued identity because ad hoc signing does not track reliably. The Mac app's current ad hoc fallback in `make build` would make the Local Network grant unreliable.
+- Addition: specific service types listed in `NSBonjourServices` need no multicast entitlement; that entitlement applies only to arbitrary service types or browsing all types.
+- Addition: a denied connection enters `NWConnection.State.waiting` with `NWPath.UnsatisfiedReason.localNetworkDenied`, and the system retries automatically after a later grant, so the iPhone can report "permission denied" distinctly from "Mac unreachable".
