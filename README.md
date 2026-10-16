@@ -20,19 +20,13 @@ Those private entry points have no Apple contract. The default-output binding is
 make ios-ipa
 ```
 
-The command builds `.build/ios/MonitorRemote.ipa`, an unsigned IPA to install with SideStore. With it, the iPhone raises, lowers, and mutes the volume while it is on the same Wi-Fi as the Mac and the Monitor Remote app is open. The app lets go of the Mac when it moves to the background and reconnects when it is opened again.
-
-Monitor Remote is an iPhone app with three buttons, Volume Up, Volume Down, and Mute, that behave like the Mac's keys while both devices are on the same Wi-Fi. Holding a button repeats like a held key. Each press goes through Monitor Volume, so the monitor and the HUD respond when the target monitor is the default audio output, and macOS handles the press otherwise. The app finds the Mac through Bonjour and needs no pairing. It shows only whether a Mac is reachable, never the volume.
-
-The Mac listens on the local network with no authentication: any device on the same Wi-Fi can press those three keys. The decision is recorded in [ADR 0007](docs/adr/0007-remote-input-as-synthetic-media-keys.md).
-
-The first time Monitor Volume runs with the companion support, macOS asks whether it may access the local network. Allow it; without that grant the iPhone cannot find the Mac.
+The command builds `.build/ios/MonitorRemote.ipa`. With it, the iPhone raises, lowers, and mutes the volume while it is on the same Wi-Fi as the Mac and the Monitor Remote app is open. The app lets go of the Mac when it moves to the background and reconnects when it is opened again.
 
 ### Install with SideStore
 
 The companion is installed with [SideStore](https://sidestore.io/) and a free Apple Account; no Apple Developer Program membership is needed.
 
-After `make ios-ipa`, move `.build/ios/MonitorRemote.ipa` to the iPhone (AirDrop or Files), then open it in SideStore, which signs it with your Apple Account. Keep SideStore refreshing the app every 7 days. On first launch, allow Local Network access; if it was denied, the app links to Settings.
+After `make ios-ipa`, move `.build/ios/MonitorRemote.ipa` to the iPhone (AirDrop or Files), then open it in SideStore, which signs it with your Apple Account.
 
 ## Performance
 
