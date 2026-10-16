@@ -9,6 +9,7 @@ final class ApplicationCoordinator: NSObject, NSApplicationDelegate, MediaKeyInt
     private let output: CoreAudioOutputRepository
     private let interceptor: MediaKeyInterceptor
     private let osd: VolumeOSDPresenter
+    private let remoteListener: RemoteCommandListener
     private let permissionSession: AccessibilityPermissionSession
     private let diagnostics: InputLifecycleDiagnostics?
     private var reducer = VolumeIntentReducer()
@@ -27,6 +28,7 @@ final class ApplicationCoordinator: NSObject, NSApplicationDelegate, MediaKeyInt
         self.diagnostics = diagnostics
         interceptor = MediaKeyInterceptor(eligibility: eligibility, diagnostics: diagnostics)
         osd = VolumeOSDPresenter()
+        remoteListener = RemoteCommandListener(poster: SystemMediaKeyPoster())
         let settings = SystemSettingsAccessibilityController()
         permissionSession = AccessibilityPermissionSession(
             applicationURL: Bundle.main.bundleURL,
@@ -60,6 +62,7 @@ final class ApplicationCoordinator: NSObject, NSApplicationDelegate, MediaKeyInt
         workspace.addObserver(self, selector: #selector(willSleep), name: NSWorkspace.willSleepNotification, object: nil)
         workspace.addObserver(self, selector: #selector(didWake), name: NSWorkspace.didWakeNotification, object: nil)
         reopen()
+        remoteListener.start()
         registerAtLoginOnFirstLaunch()
     }
 
@@ -83,6 +86,7 @@ final class ApplicationCoordinator: NSObject, NSApplicationDelegate, MediaKeyInt
         reopenAfterTapRelease = false
         stopPermissionPolling()
         permissionSession.end(.termination)
+        remoteListener.stop()
         outputObservation = nil
         let generation = eligibility.invalidate()
         interceptor.stop(reason: .termination)
@@ -209,6 +213,7 @@ final class ApplicationCoordinator: NSObject, NSApplicationDelegate, MediaKeyInt
         sleeping = true
         stopPermissionPolling()
         permissionSession.end(.sleep)
+        remoteListener.stop()
         let generation = eligibility.sleep()
         diagnostics?.record(.lifecycle(.sleep, generation: generation))
         interceptor.stop(reason: .sleep)
@@ -218,6 +223,7 @@ final class ApplicationCoordinator: NSObject, NSApplicationDelegate, MediaKeyInt
     @objc private func didWake() {
         guard sleeping, !stopped else { return }
         sleeping = false
+        remoteListener.start()
         switch eligibility.wake() {
         case let .revalidate(generation):
             diagnostics?.record(.lifecycle(.wake, generation: generation))

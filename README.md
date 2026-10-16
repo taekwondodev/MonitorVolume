@@ -14,9 +14,23 @@ A CoreGraphics event tap intercepts Volume Up, Volume Down, and Mute. That tap r
 
 Those private entry points have no Apple contract. The default-output binding is recorded in [ADR 0001](docs/adr/0001-follow-default-monitor-audio-output.md). The app-owned HUD, rather than the private Tahoe OSD, is recorded in [ADR 0002](docs/adr/0002-replace-native-volume-osd-on-macos-tahoe.md).
 
+## iOS Companion
+
+```bash
+make ios-ipa
+```
+
+The command builds `.build/ios/MonitorRemote.ipa`. With it, the iPhone raises, lowers, and mutes the volume while it is on the same Wi-Fi as the Mac and the Monitor Remote app is open. The app lets go of the Mac when it moves to the background and reconnects when it is opened again.
+
+### Install with SideStore
+
+The companion is installed with [SideStore](https://sidestore.io/) and a free Apple Account; no Apple Developer Program membership is needed.
+
+After `make ios-ipa`, move `.build/ios/MonitorRemote.ipa` to the iPhone (AirDrop or Files), then open it in SideStore, which signs it with your Apple Account.
+
 ## Performance
 
-Idle measurements of the installed Release app on Mac14,9, macOS 26.5 build 25F71, arm64. Physical footprint is the quantity Activity Monitor displays, not RSS.
+Idle measurements of the installed Release app on Mac14,9, macOS 27.0 build 26A428, arm64. Physical footprint is the quantity Activity Monitor displays, not RSS.
 
 <p align="center">
   <img src="docs/performance/idle.svg" alt="Idle CPU, physical footprint, and installed bundle size">
@@ -30,7 +44,7 @@ The numbers come from `make profile`. They are not a historical HUD record.
 make build
 ```
 
-The Makefile builds, signs, installs, and launches `Monitor Volume` in `~/Applications`.
+The Makefile builds, signs, installs, and launches `Monitor Volume` in `~/Applications`. With an Apple Development identity installed, the Accessibility and Local Network grants survive rebuilds; with the ad hoc fallback, macOS may ask for both again after each rebuild.
 
 ## Profiling
 
