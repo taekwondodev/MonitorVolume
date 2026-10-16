@@ -30,6 +30,11 @@ INSTALLED_BUNDLE = Path.home() / "Applications" / f"{APP_NAME}.app"
 INSTALLED_EXECUTABLE = INSTALLED_BUNDLE / "Contents" / "MacOS" / EXECUTABLE_NAME
 LEGACY_BUNDLE = Path.home() / "Applications" / f"{LEGACY_APP_NAME}.app"
 LEGACY_EXECUTABLE = LEGACY_BUNDLE / "Contents" / "MacOS" / LEGACY_EXECUTABLE_NAME
+IOS_PROJECT = ROOT / "ios" / "MonitorRemote.xcodeproj"
+IOS_SCHEME = "MonitorRemote"
+IOS_DERIVED_DATA = ROOT / ".build" / "ios"
+IOS_IPA = IOS_DERIVED_DATA / "MonitorRemote.ipa"
+IOS_MINIMUM_RUNTIME = (26, 0)
 IDLE_BASELINE = ROOT / "docs" / "performance" / "idle-baseline.json"
 IDLE_CHART = ROOT / "docs" / "performance" / "idle.svg"
 IDLE_SAMPLE_COUNT = 6
@@ -613,6 +618,74 @@ def check_source() -> Dict[str, Any]:
     }
 
 
+def xcodebuild(*arguments: str, stream: bool = False) -> None:
+    command = [
+        "xcodebuild",
+        *arguments,
+        "-project",
+        str(IOS_PROJECT),
+        "-scheme",
+        IOS_SCHEME,
+        "-derivedDataPath",
+        str(IOS_DERIVED_DATA),
+        "CODE_SIGNING_ALLOWED=NO",
+    ]
+    if not stream:
+        run(command, cwd=ROOT)
+        return
+    if subprocess.run(command, cwd=ROOT).returncode != 0:
+        raise RuntimeError(f"Command failed ({' '.join(command)})")
+
+
+def select_ios_simulator(devices_json: str) -> str:
+    candidates = []
+    for runtime, devices in json.loads(devices_json)["devices"].items():
+        prefix = "com.apple.CoreSimulator.SimRuntime.iOS-"
+        if not runtime.startswith(prefix):
+            continue
+        version = tuple(int(part) for part in runtime[len(prefix):].split("-"))
+        if version < IOS_MINIMUM_RUNTIME:
+            continue
+        for device in devices:
+            if device.get("isAvailable") and device["name"].startswith("iPhone"):
+                candidates.append((version, device["name"], device["udid"]))
+    if not candidates:
+        raise RuntimeError("No available iPhone simulator with iOS 26 or later; install one in Xcode")
+    return max(candidates)[2]
+
+
+def ios_simulator_destination() -> str:
+    devices = run(["xcrun", "simctl", "list", "devices", "available", "--json"]).stdout
+    return f"platform=iOS Simulator,id={select_ios_simulator(devices)}"
+
+
+def test_ios() -> Dict[str, Any]:
+    destination = ios_simulator_destination()
+    xcodebuild("test", "-destination", destination, stream=True)
+    return {"status": "passed", "destination": destination}
+
+
+def check_ios() -> Dict[str, Any]:
+    xcodebuild("build", "-configuration", "Release", "-destination", "generic/platform=iOS Simulator")
+    return {"status": "passed", "ios_simulator_release_build": True, "signed": False}
+
+
+def build_ios_ipa() -> Dict[str, Any]:
+    xcodebuild("build", "-configuration", "Release", "-destination", "generic/platform=iOS")
+    app = IOS_DERIVED_DATA / "Build" / "Products" / "Release-iphoneos" / f"{IOS_SCHEME}.app"
+    if not (app / IOS_SCHEME).is_file():
+        raise RuntimeError(f"iOS app is missing: {app}")
+    with tempfile.TemporaryDirectory() as scratch:
+        payload = Path(scratch) / "Payload"
+        payload.mkdir()
+        run(["ditto", str(app), str(payload / app.name)])
+        staged = Path(scratch) / IOS_IPA.name
+        run(["ditto", "-c", "-k", "--norsrc", "--noextattr", "--noacl", "--keepParent", str(payload), str(staged)])
+        IOS_IPA.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(staged), IOS_IPA)
+    return {"status": "built", "ipa": str(IOS_IPA), "signed": False}
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -620,6 +693,9 @@ def main() -> int:
         choices=(
             "build",
             "check",
+            "ios-check",
+            "ios-ipa",
+            "ios-test",
             "profile",
             "stop",
             "verify",
@@ -631,6 +707,12 @@ def main() -> int:
             result = install_and_launch()
         elif arguments.command == "check":
             result = check_source()
+        elif arguments.command == "ios-check":
+            result = check_ios()
+        elif arguments.command == "ios-ipa":
+            result = build_ios_ipa()
+        elif arguments.command == "ios-test":
+            result = test_ios()
         elif arguments.command == "profile":
             result = profile_installed_app()
         elif arguments.command == "stop":

@@ -40,11 +40,18 @@ class CommandSurfaceTests(unittest.TestCase):
             "build": "scripts/build-app.sh",
             "verify": "scripts/verify-installed-app.sh",
             "profile": "scripts/profile-app.sh",
+            "ios-ipa": 'scripts/ios.sh" ipa',
             "clean": "swift package clean",
         }
         for target, expected_command in expected_commands.items():
             with self.subTest(target=target):
                 self.assertIn(expected_command, self.make_dry_run(target))
+
+    def test_test_and_check_include_the_ios_steps(self) -> None:
+        test = self.make_dry_run("test")
+        self.assertIn("swift test --package-path Shared/MonitorRemoteProtocol", test)
+        self.assertIn('scripts/ios.sh" test', test)
+        self.assertIn('scripts/ios.sh" check', self.make_dry_run("check"))
 
     def test_clean_is_limited_to_swiftpm_artifacts(self) -> None:
         command = self.make_dry_run("clean")
