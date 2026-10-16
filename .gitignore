@@ -1,5 +1,7 @@
 .build/
 .DS_Store
 *.xcodeproj/
+!ios/MonitorRemote.xcodeproj/
+xcuserdata/
 .hermes/verification/
 .swiftpm/
