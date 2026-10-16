@@ -23,3 +23,11 @@ _Avoid_: Broken mute, software-muted monitor
 **Multi-display configuration**:
 A hardware configuration in which the target monitor and at least one other external display are connected concurrently.
 _Avoid_: Multi-monitor support
+
+**Companion**:
+The Monitor Remote iPhone app that sends Volume Up, Volume Down, and Mute to Monitor Volume over the local network. It shows no volume or mute state.
+_Avoid_: Remote app, client, iOS app
+
+**Remote input**:
+A volume key press that arrives from the companion and enters the same admission path as a physical key, as a synthetic media key event.
+_Avoid_: Network command, virtual key

@@ -14,9 +14,27 @@ A CoreGraphics event tap intercepts Volume Up, Volume Down, and Mute. That tap r
 
 Those private entry points have no Apple contract. The default-output binding is recorded in [ADR 0001](docs/adr/0001-follow-default-monitor-audio-output.md). The app-owned HUD, rather than the private Tahoe OSD, is recorded in [ADR 0002](docs/adr/0002-replace-native-volume-osd-on-macos-tahoe.md).
 
+## iPhone companion
+
+Monitor Remote is an iPhone app with three buttons, Volume Up, Volume Down, and Mute, that behave like the Mac's keys while both devices are on the same Wi-Fi. Holding a button repeats like a held key. Each press goes through Monitor Volume, so the monitor and the HUD respond when the target monitor is the default audio output, and macOS handles the press otherwise. The app finds the Mac through Bonjour and needs no pairing. It shows only whether a Mac is reachable, never the volume.
+
+The Mac listens on the local network with no authentication: any device on the same Wi-Fi can press those three keys. The decision is recorded in [ADR 0007](docs/adr/0007-remote-input-as-synthetic-media-keys.md).
+
+The first time Monitor Volume runs with the companion support, macOS asks whether it may access the local network. Allow it; without that grant the iPhone cannot find the Mac.
+
+### Install with SideStore
+
+The companion is installed with [SideStore](https://sidestore.io/) and a free Apple Account; no Apple Developer Program membership is needed.
+
+```bash
+make ios-ipa
+```
+
+The command writes an unsigned `.build/ios/MonitorRemote.ipa`. Move it to the iPhone (AirDrop or Files), then open it in SideStore, which signs it with your Apple Account. Keep SideStore refreshing the app every 7 days. On first launch, allow Local Network access; if it was denied, the app links to Settings.
+
 ## Performance
 
-Idle measurements of the installed Release app on Mac14,9, macOS 26.5 build 25F71, arm64. Physical footprint is the quantity Activity Monitor displays, not RSS.
+Idle measurements of the installed Release app on Mac14,9, macOS 27.0 build 26A428, arm64. Physical footprint is the quantity Activity Monitor displays, not RSS.
 
 <p align="center">
   <img src="docs/performance/idle.svg" alt="Idle CPU, physical footprint, and installed bundle size">
@@ -30,7 +48,7 @@ The numbers come from `make profile`. They are not a historical HUD record.
 make build
 ```
 
-The Makefile builds, signs, installs, and launches `Monitor Volume` in `~/Applications`.
+The Makefile builds, signs, installs, and launches `Monitor Volume` in `~/Applications`. With an Apple Development identity installed, the Accessibility and Local Network grants survive rebuilds; with the ad hoc fallback, macOS may ask for both again after each rebuild.
 
 ## Profiling
 
