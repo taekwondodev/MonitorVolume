@@ -10,6 +10,9 @@ let package = Package(
     products: [
         .executable(name: "MonitorVolume", targets: ["MonitorVolume"])
     ],
+    dependencies: [
+        .package(path: "Shared/MonitorRemoteProtocol")
+    ],
     targets: [
         .target(
             name: "MonitorTransport",
@@ -24,11 +27,18 @@ let package = Package(
         ),
         .executableTarget(
             name: "MonitorVolume",
-            dependencies: ["MonitorVolumeCore"]
+            dependencies: [
+                "MonitorVolumeCore",
+                .product(name: "MonitorRemoteProtocol", package: "MonitorRemoteProtocol")
+            ]
         ),
         .testTarget(
             name: "MonitorVolumeTests",
-            dependencies: ["MonitorVolume", "MonitorVolumeCore"]
+            dependencies: [
+                "MonitorVolume",
+                "MonitorVolumeCore",
+                .product(name: "MonitorRemoteProtocol", package: "MonitorRemoteProtocol")
+            ]
         )
     ]
 )
